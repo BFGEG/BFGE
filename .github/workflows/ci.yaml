@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  checks:
+    name: Lint, Build, Test, Docs
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry & build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      # 1. Форматирование — должен идти первым, быстрый и не требует сборки
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      # 2. Линтер — предупреждения трактуются как ошибки
+      - name: Run clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # 3. Сборка — проверяем, что проект компилируется
+      - name: Build
+        run: cargo build --all-features --verbose
+
+      # 4. Тесты — включая doctests
+      - name: Run tests
+        run: cargo test --all-features --verbose
+
+      # 5. Документация — предупреждения также считаются ошибками
+      - name: Build documentation
+        run: cargo doc --no-deps --all-features
+        env:
+          RUSTDOCFLAGS: "-D warnings"
