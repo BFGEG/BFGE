@@ -1,0 +1,45 @@
+@startuml freak_engine_modules
+left to right direction
+skinparam componentStyle rectangle
+
+actor "Клиентское приложение" as Client
+
+component "Публичный интерфейс\nдвижка" as API
+component "Движок" as Engine
+component "Сцена" as Scene
+component "Ресурсы" as Resources
+component "Системы" as Systems
+component "Подготовка кадра" as Preparation
+artifact "Кадр отображения" as Frame
+component "Обработчик отображения" as Renderer
+component "Графическая система\nотображения" as RenderSystem
+component "Графическая платформа" as Backend
+node "Графический процессор" as GPU
+
+Client --> API : запросы и получение\nизображения
+API --> Engine : передать запрос
+Engine --> API : изображение, уведомления,\nрезультаты и ошибки
+
+Engine --> Scene : изменения и чтение сцены
+Engine --> Resources : доступ к данным моделей
+Engine --> Systems : запуск, завершение,\nфайловые запросы
+Systems --> Scene : создать объект,\nсохранить или восстановить
+Systems --> Resources : загрузить или восстановить\nданные модели
+Systems --> Engine : результат или ошибка
+
+Engine --> Preparation : цикл обновления
+Scene --> Preparation : узлы, объекты,\nточка обзора
+Resources --> Preparation : геометрия и цвет
+Preparation --> Frame : собрать кадр
+Frame --> Renderer : состояние сцены
+Engine --> Renderer : размер изображения
+Resources --> Renderer : данные для изображения
+Renderer --> RenderSystem : запрос отображения
+RenderSystem --> Backend : графические команды
+Backend --> GPU : команды для создания\nизображения
+GPU --> Backend : изображение
+Backend --> RenderSystem : результат отображения
+RenderSystem --> Renderer : результат или ошибка
+Renderer --> Engine : новое изображение\nили ошибка
+
+@enduml
