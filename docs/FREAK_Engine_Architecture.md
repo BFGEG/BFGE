@@ -13,6 +13,7 @@
 - `Entity` как экземпляр отображаемого объекта;
 - `Mesh`, `Material`, `Texture` как разделяемые ресурсы;
 - `RenderSystem` как абстракция конкретного графического API.
+- `FrameListener`
 
 При этом архитектура не должна буквально копировать C++-модель OGRE. Она должна быть адаптирована к Rust и его типовой модели владения, ссылок, enum-типов и trait-интерфейсов.
 
@@ -36,35 +37,29 @@
 # 3. Главная архитектурная схема
 
 ```text
-UI / Editor / Client Application
-                |
-                v
-          Public Engine API
-                |
-                v
-             Engine
-        /        |        \
-       v         v         v
-    Scene     Resources   Systems
-       \         |         /
-        \        |        /
-         v       v       v
-          Frame Preparation
-                |
-                v
-            RenderFrame
-                |
-                v
-             Renderer
-                |
-                v
-          RenderSystem
-                |
-                v
-       wgpu / Vulkan / OpenGL
-                |
-                v
-               GPU
+              UI / Editor / Client Application
+                            |
+                            v
+                      Public Engine API
+                            |
+                            v
+                          Engine
+                            |
+                            v
+ResourceManager <-> Scene <- Core
+                    \       |
+                     \      |
+                      v     v
+                        Event loop
+                            |
+                            v
+                      Frame Preparation  <-- FrameListener
+                            |
+                            v
+                         Renderer
+                            |
+                            v
+                   wgpu / Vulkan / OpenGL
 ```
 
 ---
@@ -253,36 +248,7 @@ Shader Module
 
 # 8. `Transform`
 
-```rust
-pub struct Transform {
-    pub position: Vec3,
-    pub rotation: Quat,
-    pub scale: Vec3,
-}
-```
-
-Минимальный интерфейс:
-
-```rust
-impl Transform {
-    pub fn identity() -> Self;
-
-    pub fn matrix(&self) -> Mat4;
-}
-```
-
-World transform может вычисляться через иерархию:
-
-```text
-world_transform =
-    parent_world_transform
-    *
-    local_transform
-```
-
-World transform не обязан постоянно храниться в node.
-
----
+Ответственность за преобразованиями объектов у пользователя
 
 # 9. `MovableObject` / `SceneObjectId`
 
@@ -396,6 +362,8 @@ pub struct Light {
 
 Положение источника света не должно храниться внутри `Light`.
 
+Пока не делаем
+
 ---
 
 # 13. Модуль `resources`
@@ -461,35 +429,6 @@ pub struct SubMesh {
 
 ---
 
-# 16. `Material`
-
-```rust
-pub struct Material {
-    shader: ShaderHandle,
-    textures: Vec<TextureHandle>,
-    parameters: MaterialParameters,
-}
-```
-
-Минимально материал должен позволять задавать:
-
-```text
-base color
-texture
-shader
-```
-
-Архитектура должна позволять позже добавить:
-
-```text
-metallic
-roughness
-normal map
-emission
-transparency
-```
-
----
 
 # 17. Принцип Resource vs Instance
 
@@ -525,10 +464,8 @@ Systems реализуют логику над сценой.
 Примеры:
 
 ```text
-TransformSystem
 VisibilitySystem
 CameraSystem
-AnimationSystem
 ```
 
 Базовый интерфейс может быть таким:
@@ -555,9 +492,11 @@ Renderer не должен напрямую обходить внутренни�
 
 Нужно формировать отдельную структуру `RenderFrame`.
 
+FrameListener
+
 ---
 
-# 20. `RenderFrame`
+# 20. `RenderFrame` (Viewport)
 
 ```rust
 pub struct RenderFrame {
@@ -602,9 +541,6 @@ RenderFrame
   |
   v
 Renderer
-  |
-  v
-RenderSystem
   |
   v
 GPU
@@ -1154,7 +1090,6 @@ package Core {
 package Scene {
     class SceneManager
     class SceneNode
-    class Transform
 
     class Entity
     class Camera
@@ -1170,7 +1105,7 @@ package Resources {
 }
 
 package Rendering {
-    class RenderFrame
+    class ViewPort
     class RenderItem
 
     interface RenderSystem
@@ -1182,7 +1117,6 @@ Engine --> ResourceManager
 Engine --> Renderer
 
 SceneManager *-- SceneNode
-SceneNode *-- Transform
 
 SceneNode --> Entity
 SceneNode --> Camera
@@ -1198,11 +1132,11 @@ ResourceManager *-- Texture
 Mesh *-- SubMesh
 Material --> Texture
 
-SceneManager ..> RenderFrame : builds
-RenderFrame *-- RenderItem
+SceneManager ..> ViewPort : builds
+ViewPort *-- RenderItem
 
 Renderer --> RenderSystem
-Renderer ..> RenderFrame
+Renderer ..> ViewPort
 Renderer --> ResourceManager
 
 @enduml
