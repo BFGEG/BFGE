@@ -13,7 +13,6 @@
 - `Entity` как экземпляр отображаемого объекта;
 - `Mesh`, `Material`, `Texture` как разделяемые ресурсы;
 - `RenderSystem` как абстракция конкретного графического API.
-- `FrameListener`
 
 При этом архитектура не должна буквально копировать C++-модель OGRE. Она должна быть адаптирована к Rust и его типовой модели владения, ссылок, enum-типов и trait-интерфейсов.
 
@@ -44,23 +43,29 @@
                             |
                             v
                           Engine
+              +-------------+-------------+
+              |             |             |
+              v             v             v
+            Scene       Resources       Systems
+              |             |             |
+              |             |             +--- сборка, инициализация
+              |             |             |    и завершение частей
+              |             |             +--- загрузка моделей,
+              |             |                  save/restore сцены
+              v             |
+      build_render_frame    |
+              |             |
+              v             v
+          RenderFrame --> Renderer
                             |
                             v
-ResourceManager <-> Scene <- Core
-                    \       |
-                     \      |
-                      v     v
-                        Event loop
+                       RenderSystem
                             |
                             v
-                      Frame Preparation  <-- FrameListener
-                            |
-                            v
-                         Renderer
-                            |
-                            v
-                   wgpu / Vulkan / OpenGL
+                    wgpu (backend) --> GPU
 ```
+
+`Systems` собирает, инициализирует и завершает части движка (`systems::lifecycle`), загружает модели и хранит сохранённую сцену.
 
 ---
 
@@ -84,7 +89,7 @@ ResourceManager <-> Scene <- Core
 
 `Engine` должен:
 
-- инициализировать подсистемы;
+- инициализировать и завершать подсистемы (через `systems::lifecycle`);
 - владеть или координировать основные модули;
 - предоставлять публичную точку входа;
 - выполнять `update`;
@@ -117,22 +122,14 @@ pub struct Engine {
 
 ```rust
 impl Engine {
-    pub fn new(config: EngineConfig) -> Result<Self, EngineError>;
+    pub fn new() -> Self;
 
-    pub fn scene(&self) -> &SceneManager;
-    pub fn scene_mut(&mut self) -> &mut SceneManager;
+    // Публичные операции — трейт EngineApi (FREAK_Engine_Public_API.md);
+    // initialize/shutdown выполняются через systems::lifecycle.
 
-    pub fn resources(&self) -> &ResourceManager;
-    pub fn resources_mut(&mut self) -> &mut ResourceManager;
-
-    pub fn update(
-        &mut self,
-        dt: Duration,
-    ) -> Result<(), EngineError>;
-
-    pub fn render(
-        &mut self,
-    ) -> Result<RenderStats, EngineError>;
+    // Внутренний цикл отображения:
+    fn update(&mut self, dt: Duration) -> Result<(), EngineError>;
+    fn render(&mut self) -> Result<(), EngineError>;
 }
 ```
 
@@ -154,9 +151,9 @@ impl Engine {
 SceneManager
 SceneNode
 Transform
-Entity
-Camera
-Light
+SceneObject
+Viewpoint
+SceneNodeId
 SceneObjectId
 ```
 
@@ -171,13 +168,10 @@ SceneObjectId
 Он должен:
 
 - хранить корневой `SceneNode`;
-- создавать и удалять nodes;
-- создавать и удалять entities;
-- создавать камеры;
-- создавать источники света;
-- прикреплять объекты к nodes;
-- откреплять объекты;
-- хранить активную камеру;
+- создавать nodes;
+- создавать объекты сцены из загруженных моделей;
+- прикреплять объекты к nodes и перепривязывать их к другим узлам;
+- хранить единственную точку обзора (вне иерархии узлов);
 - предоставлять traversal scene graph;
 - подготавливать данные для RenderFrame.
 
@@ -186,15 +180,13 @@ SceneObjectId
 ```rust
 pub struct SceneManager {
     root: SceneNodeId,
-
-    nodes: Arena<SceneNode>,
-    entities: Arena<Entity>,
-    cameras: Arena<Camera>,
-    lights: Arena<Light>,
-
-    active_camera: Option<CameraId>,
+    nodes: Vec<SceneNode>,
+    objects: Vec<SceneObject>,
+    viewpoint: ViewpointState,
 }
 ```
+
+В v1 ничего не удаляется, поэтому достаточно `Vec`; конкретное хранилище — внутренняя деталь, идентификаторы непрозрачны.
 
 ## 6.3. Главное правило
 
@@ -248,31 +240,39 @@ Shader Module
 
 # 8. `Transform`
 
-Ответственность за преобразованиями объектов у пользователя
-
-# 9. `MovableObject` / `SceneObjectId`
-
-Архитектура должна сохранить концептуальную идею OGRE `MovableObject`, но не обязана повторять C++-иерархию наследования.
-
-Для Rust предпочтительно использовать enum и strongly typed IDs.
+Преобразование — положение, поворот и масштаб.
 
 ```rust
-pub enum SceneObjectId {
-    Entity(EntityId),
-    Camera(CameraId),
-    Light(LightId),
+pub struct Transform {
+    pub translation: Vec3,
+    pub rotation: Quat,
+    pub scale: Vec3,
 }
 ```
 
-Использовать `Box<dyn MovableObject>` следует только если runtime-polymorphism действительно нужен.
+`Transform` есть только у `SceneNode` (локальное преобразование в иерархии). `SceneObject` собственного преобразования не хранит — положение, поворот и масштаб объекта определяются узлом, к которому он привязан. Мировая трансформация вычисляется при обходе сцены и не хранится постоянно:
+
+```text
+world_transform = parent_world_transform * local_transform
+```
+
+# 9. `SceneObjectId`
+
+В первой версии объект сцены один — объект загруженной модели. Идентификаторы непрозрачны для клиента и strongly typed:
+
+```rust
+pub struct SceneObjectId(/* private */ u32);
+```
+
+Точка обзора объектом сцены не является и в иерархию не входит (см. §11). Источники света и другие виды объектов (enum-расширение `SceneObjectId`) — после v1.
 
 ---
 
-# 10. `Entity`
+# 10. `SceneObject`
 
 ## 10.1. Назначение
 
-`Entity` — экземпляр отображаемого объекта в сцене.
+`SceneObject` — экземпляр отображаемого объекта в сцене (объект загруженной модели).
 
 Его семантика:
 
@@ -281,64 +281,44 @@ pub enum SceneObjectId {
 ## 10.2. Возможная структура
 
 ```rust
-pub struct Entity {
+pub struct SceneObject {
     mesh: MeshHandle,
-    material_overrides: Vec<Option<MaterialHandle>>,
-    visible: bool,
 }
 ```
+
+Собственного преобразования у объекта нет: положение, поворот и масштаб определяются узлом, к которому он привязан (§7, §8).
 
 ## 10.3. Главное правило
 
-`Entity` не должна содержать vertex/index data напрямую.
+`SceneObject` не должен содержать vertex/index data напрямую.
 
-Она должна ссылаться на ресурсы.
+Он должен ссылаться на ресурсы.
 
 ```text
-Entity ---> MeshHandle ---> Mesh
+SceneObject ---> MeshHandle ---> Mesh
 ```
 
-Один `Mesh` может использоваться несколькими `Entity`.
+Один `Mesh` может использоваться несколькими `SceneObject`.
+
+Удаление, скрытие и подмена внешнего вида объекта — после v1 (ФТ-15, ФТ-16, ФТ-23).
 
 ---
 
-# 11. `Camera`
+# 11. `Viewpoint`
 
-Camera содержит свойства камеры, но не обязана хранить position/rotation.
-
-Spatial-состояние камеры должно принадлежать `SceneNode`.
+Точка обзора одна на сцену и управляется независимо от иерархии узлов (ФТ-18).
 
 ```rust
-pub struct Camera {
-    projection: Projection,
+pub struct ViewpointState {
+    pub position: Vec3,
+    pub direction: Vec3, // направление взгляда
+    pub fov_y: f32,      // вертикальный угол обзора, радианы
 }
 ```
 
-```rust
-pub enum Projection {
-    Perspective {
-        fov_y: f32,
-        near: f32,
-        far: f32,
-    },
+Значения по умолчанию: позиция `(0, 0, 5)`, взгляд вдоль `-Z`, угол обзора 60°.
 
-    Orthographic {
-        height: f32,
-        near: f32,
-        far: f32,
-    },
-}
-```
-
-Связь:
-
-```text
-SceneNode
-    |
-    + Transform
-    |
-    + Camera
-```
+Ортографическая проекция и несколько точек обзора — после v1.
 
 ---
 
@@ -362,7 +342,7 @@ pub struct Light {
 
 Положение источника света не должно храниться внутри `Light`.
 
-Пока не делаем
+**После v1.** В первой версии источников света нет (см. требования).
 
 ---
 
@@ -370,7 +350,7 @@ pub struct Light {
 
 ## 13.1. Назначение
 
-Resources отвечают за тяжёлые, разделяемые, потенциально GPU-зависимые данные.
+Resources отвечают за разделяемые данные моделей (в v1 — геометрия и общий простой цвет модели).
 
 ## 13.2. Основные сущности
 
@@ -378,10 +358,11 @@ Resources отвечают за тяжёлые, разделяемые, поте
 ResourceManager
 Mesh
 SubMesh
-Material
-Texture
-Shader
+Vertex
+MeshHandle
 ```
+
+`Material`, `Texture`, `Shader` — после v1.
 
 ---
 
@@ -389,10 +370,7 @@ Shader
 
 ```rust
 pub struct ResourceManager {
-    meshes: Arena<Mesh>,
-    materials: Arena<Material>,
-    textures: Arena<Texture>,
-    shaders: Arena<Shader>,
+    meshes: Vec<Mesh>,
 }
 ```
 
@@ -400,45 +378,55 @@ pub struct ResourceManager {
 
 ```rust
 MeshHandle
-MaterialHandle
-TextureHandle
-ShaderHandle
 ```
 
-Handles должны быть strongly typed.
+Handles должны быть strongly typed и непрозрачны для клиента. `MaterialHandle`/`TextureHandle`/`ShaderHandle` — после v1.
 
 ---
 
 # 15. `Mesh`
 
-`Mesh` является ресурсом геометрии.
+`Mesh` является ресурсом геометрии и общего простого цвета модели.
 
 ```rust
 pub struct Mesh {
     submeshes: Vec<SubMesh>,
+    color: [f32; 4], // linear RGBA, общий цвет модели
 }
 ```
 
 ```rust
 pub struct SubMesh {
-    vertices: VertexData,
-    indices: IndexData,
-    default_material: Option<MaterialHandle>,
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
 }
 ```
 
+```rust
+pub struct Vertex {
+    position: Vec3,
+}
+```
+
+Нормали и текстурные координаты — после v1 (вместе с освещением и текстурами).
+
 ---
 
+# 16. Вне первой версии: `Material`, `Texture`, `Shader`
+
+В первой версии внешний вид — один простой цвет модели, хранимый в `Mesh` (§15). Клиент не может переопределять внешний вид (ФТ-23).
+
+После v1: `Material` (base color, затем metallic/roughness/normal map/emission/transparency), `Texture`, `Shader` как разделяемые ресурсы; handles `MaterialHandle`/`TextureHandle`/`ShaderHandle`.
+
+---
 
 # 17. Принцип Resource vs Instance
 
 Это один из ключевых invariants системы.
 
 ```text
-Mesh        != Entity
-Material    != Entity
-Texture     != SceneNode
-SceneNode   != Entity
+Mesh        != SceneObject
+SceneNode   != SceneObject
 ```
 
 Связь:
@@ -446,41 +434,61 @@ SceneNode   != Entity
 ```text
 SceneNode
     |
-    + Entity
+    + SceneObject
         |
-        + MeshHandle --------> Mesh
-        |
-        + MaterialHandle ----> Material
-                                  |
-                                  + TextureHandle ---> Texture
+        + MeshHandle --------> Mesh (геометрия + цвет модели)
 ```
+
+`Material`, `Texture`, `Shader` добавляются после v1 по той же схеме (ресурс ≠ экземпляр).
 
 ---
 
 # 18. Модуль `systems`
 
-Systems реализуют логику над сценой.
-
-Примеры:
-
-```text
-VisibilitySystem
-CameraSystem
-```
-
-Базовый интерфейс может быть таким:
+Systems отвечают за жизненный цикл и файловые операции: собирают, инициализируют и завершают части движка, загружают модели и сохраняют/восстанавливают сцену. Клиент не подключает собственные системы (см. требования).
 
 ```rust
-pub trait System {
-    fn update(
-        &mut self,
-        scene: &mut SceneManager,
-        dt: Duration,
-    ) -> Result<(), SystemError>;
+pub struct EngineParts {
+    pub scene: SceneManager,
+    pub resources: ResourceManager,
+    pub renderer: Renderer,
+    pub store: SceneStore,
 }
+
+pub fn create() -> EngineParts;
+
+pub fn initialize(
+    parts: &mut EngineParts,
+    image_size: ImageSize,
+) -> Result<(), LifecycleError>;
+
+pub fn shutdown(parts: &mut EngineParts) -> Result<(), LifecycleError>;
+
+pub fn load_model(
+    path: &Path,
+    resources: &mut ResourceManager,
+    scene: &mut SceneManager,
+    parent: SceneNodeId,
+) -> Result<SceneObjectId, ModelLoadError>;
+
+pub struct SceneStore { /* private */ }
+
+pub fn save_scene(
+    store: &mut SceneStore,
+    scene: &SceneManager,
+    resources: &ResourceManager,
+) -> Result<(), ScenePersistenceError>;
+
+pub fn restore_scene(
+    store: &mut SceneStore,
+    scene: &mut SceneManager,
+    resources: &mut ResourceManager,
+) -> Result<(), ScenePersistenceError>;
 ```
 
-Для MVP не требуется полноценный ECS scheduler.
+`create` собирает части, `initialize` инициализирует графику и задаёт размер изображения, `shutdown` завершает работу; ошибки жизненного цикла — `LifecycleError`. В первой версии сохранение хранится в памяти движка; формат файла — после v1.
+
+`System` trait не создаётся: заменяемые реализации систем не нужны, trait оправдан только там, где действительно нужна замена (см. §44), прежде всего для `RenderSystem`. Отсечение невидимого, анимационные и прочие системы — после v1.
 
 ---
 
@@ -492,17 +500,14 @@ Renderer не должен напрямую обходить внутренни�
 
 Нужно формировать отдельную структуру `RenderFrame`.
 
-FrameListener
-
 ---
 
-# 20. `RenderFrame` (Viewport)
+# 20. `RenderFrame`
 
 ```rust
 pub struct RenderFrame {
     pub camera: RenderCamera,
     pub items: Vec<RenderItem>,
-    pub lights: Vec<RenderLight>,
 }
 ```
 
@@ -510,7 +515,6 @@ pub struct RenderFrame {
 pub struct RenderItem {
     pub world_transform: Mat4,
     pub mesh: MeshHandle,
-    pub material: MaterialHandle,
 }
 ```
 
@@ -520,6 +524,8 @@ pub struct RenderCamera {
     pub projection: Mat4,
 }
 ```
+
+`lights` и `material` в кадре — после v1.
 
 ---
 
@@ -534,13 +540,16 @@ Scene Graph
   |
   | world-transform calculation
   v
-visibility selection
+item collection
   |
   v
 RenderFrame
   |
   v
 Renderer
+  |
+  v
+RenderSystem
   |
   v
 GPU
@@ -574,26 +583,28 @@ pub struct Renderer {
 
 `RenderSystem` является интерфейсом между renderer и конкретным GPU backend.
 
+В первой версии рендеринг offscreen: backend рисует в собственный буфер и возвращает `RenderOutput` (статистика + `SceneImage`). Окна и поверхности (`RenderSurface`) в v1 нет.
+
 ```rust
 pub trait RenderSystem {
-    fn initialize(
-        &mut self,
-        surface: &RenderSurface,
-    ) -> Result<(), RenderError>;
+    fn initialize(&mut self) -> Result<(), RenderError>;
 
-    fn resize(
-        &mut self,
-        width: u32,
-        height: u32,
-    ) -> Result<(), RenderError>;
+    fn resize(&mut self, size: ImageSize) -> Result<(), RenderError>;
 
     fn render(
         &mut self,
         frame: &RenderFrame,
         resources: &ResourceManager,
-    ) -> Result<RenderStats, RenderError>;
+    ) -> Result<RenderOutput, RenderError>;
 
     fn shutdown(&mut self);
+}
+```
+
+```rust
+pub struct RenderOutput {
+    pub stats: RenderStats,
+    pub image: SceneImage,
 }
 ```
 
@@ -609,7 +620,7 @@ RenderSystem
       |
 +-----+--------+
 |              |
-WgpuBackend   VulkanBackend
+WgpuBackend   VulkanBackend (после v1)
 ```
 
 На первом этапе следует реализовать только один backend — `wgpu`.
@@ -627,8 +638,8 @@ UI должен видеть:
 ```text
 Engine
 Scene API
-Resource API
-high-level settings
+загрузка моделей (load_model)
+high-level settings (размер изображения и т.п.)
 ```
 
 UI не должен видеть:
@@ -650,134 +661,72 @@ VkDevice
 
 ```rust
 pub trait SceneApi {
-    fn root(&self) -> SceneNodeId;
+    fn root_node(&self) -> SceneNodeId;
 
     fn create_node(
         &mut self,
         parent: SceneNodeId,
-    ) -> SceneNodeId;
+    ) -> Result<SceneNodeId, SceneError>;
 
-    fn remove_node(
-        &mut self,
-        id: SceneNodeId,
-    ) -> Result<(), SceneError>;
-
-    fn set_transform(
+    fn set_node_transform(
         &mut self,
         node: SceneNodeId,
         transform: Transform,
     ) -> Result<(), SceneError>;
 
-    fn transform(
-        &self,
-        node: SceneNodeId,
-    ) -> Option<&Transform>;
-
-    fn create_entity(
+    fn reparent_object(
         &mut self,
-        mesh: MeshHandle,
-    ) -> EntityId;
-
-    fn remove_entity(
-        &mut self,
-        entity: EntityId,
+        object: SceneObjectId,
+        new_parent: SceneNodeId,
     ) -> Result<(), SceneError>;
 
-    fn attach_entity(
+    fn viewpoint(&self) -> ViewpointState;
+
+    fn set_viewpoint(
         &mut self,
-        node: SceneNodeId,
-        entity: EntityId,
+        state: ViewpointState,
     ) -> Result<(), SceneError>;
-
-    fn detach_entity(
-        &mut self,
-        entity: EntityId,
-    ) -> Result<(), SceneError>;
-
-    fn create_camera(
-        &mut self,
-        desc: CameraDescriptor,
-    ) -> CameraId;
-
-    fn set_active_camera(
-        &mut self,
-        id: CameraId,
-    ) -> Result<(), SceneError>;
-
-    fn create_light(
-        &mut self,
-        desc: LightDescriptor,
-    ) -> LightId;
 }
 ```
+
+Внутренние операции `SceneManager` для движка (не клиентский API): `create_object(mesh, parent)` и `build_render_frame(size) -> RenderFrame`. Удаление узлов и объектов — после v1.
 
 ---
 
 # 27. Resource API
 
+У клиента нет отдельного Resource API: модель загружается через `EngineApi::load_model`. Внутренний интерфейс `ResourceManager`:
+
 ```rust
-pub trait ResourceApi {
-    fn load_mesh(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<MeshHandle, ResourceError>;
-
-    fn load_texture(
-        &mut self,
-        path: impl AsRef<Path>,
-    ) -> Result<TextureHandle, ResourceError>;
-
-    fn create_material(
-        &mut self,
-        descriptor: MaterialDescriptor,
-    ) -> MaterialHandle;
+impl ResourceManager {
+    pub(crate) fn add_mesh(&mut self, mesh: Mesh) -> MeshHandle;
+    pub(crate) fn mesh(&self, handle: MeshHandle) -> Option<&Mesh>;
 }
 ```
+
+Загрузка текстур и создание материалов — после v1.
 
 ---
 
 # 28. Типичный клиентский код
 
 ```rust
-let mut engine = Engine::new(config)?;
+let mut engine = Engine::new();
+engine.initialize(ImageSize::new(1280, 720))?;
+engine.set_image_listener(Box::new(AppListener { /* ... */ }));
 
-let mesh = engine
-    .resources_mut()
-    .load_mesh("cube.obj")?;
+let root = engine.scene().root_node();
+let node = engine.scene().create_node(root)?;
 
-let material = engine
-    .resources_mut()
-    .create_material(MaterialDescriptor::default());
+engine.load_model(Path::new("cube.gltf"), node)?;
+engine.scene().set_node_transform(
+    node,
+    Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
+)?;
 
-let entity = engine
-    .scene_mut()
-    .create_entity(mesh);
-
-engine
-    .scene_mut()
-    .set_material(entity, material)?;
-
-let root = engine.scene().root();
-
-let node = engine
-    .scene_mut()
-    .create_node(root);
-
-engine
-    .scene_mut()
-    .attach_entity(node, entity)?;
-
-engine
-    .scene_mut()
-    .set_transform(
-        node,
-        Transform::from_translation(
-            Vec3::new(0.0, 0.0, -5.0)
-        ),
-    )?;
-
-engine.update(dt)?;
-engine.render()?;
+// Отрисовкой управляет сам движок; клиент получает изображения
+// через ImageListener и не вызывает update/render.
+engine.shutdown()?;
 ```
 
 ---
@@ -789,40 +738,32 @@ engine.render()?;
 ```text
 UI -> Engine API
 
-Engine -> Scene
-Engine -> Resources
-Engine -> Systems
-Engine -> Renderer
+core -> scene, resources, systems, render
 
-Systems -> Scene
+scene -> math, resources, render::frame (только DTO кадра)
 
-Scene -> shared math/types
-Resources -> shared types
+render -> math, resources
 
-Scene -> RenderFrame preparation
+backend -> render, resources, math
 
-Renderer -> RenderFrame
-Renderer -> Resources
-Renderer -> RenderSystem
-
-RenderSystem -> graphics backend
+systems -> scene, resources, render, backend
 ```
 
 Запрещённые зависимости:
 
 ```text
 Scene -> Renderer
+Scene -> RenderSystem
 Scene -> wgpu
 
 Resources -> UI
 
 Renderer -> UI
+Renderer -> SceneManager
 
 RenderSystem -> SceneManager
 
 Mesh -> SceneManager
-
-Texture -> Entity
 
 GPU Backend -> Engine
 ```
@@ -858,27 +799,29 @@ struct Renderer {
 ```rust
 let frame = scene.build_render_frame(...);
 
-let stats = renderer.render(
+let output = renderer.render(
     &frame,
     &resources,
-)?;
+)?; // RenderOutput { stats, image }
 ```
 
 ---
 
 # 31. Lifecycle одного кадра
 
+`update`/`render` — внутренние шаги цикла движка; клиент их не вызывает.
+
 ```text
 Idle
  |
- | Engine::update(dt)
+ | Engine::update(dt) (внутренний шаг)
  v
-Updating systems
+Обновление подсистем
  |
  v
 Scene updated
  |
- | Engine::render()
+ | Engine::render() (внутренний шаг)
  v
 Scene traversal
  |
@@ -886,19 +829,16 @@ Scene traversal
 World transform calculation
  |
  v
-Visibility selection
+Item collection
  |
  v
 Build RenderFrame
  |
  v
-Renderer::render()
+Renderer::render() -> RenderSystem draw commands
  |
  v
-GPU commands
- |
- v
-Present
+SceneImage -> ImageListener
  |
  v
 Idle
@@ -906,30 +846,21 @@ Idle
 
 ---
 
-# 32. Lifecycle Entity
+# 32. Lifecycle объекта сцены
 
 ```text
 Created
    |
-   v
-Detached
-   |
-   | attach
+   | attach (при загрузке модели)
    v
 Attached
    |
-   | detach
+   | set_node_transform / reparent_object
    v
-Detached
-
-Attached/Detached
-   |
-   | remove
-   v
-Destroyed
+Attached
 ```
 
-API должен корректно обрабатывать некорректные переходы.
+Удаление, скрытие и состояние Detached — после v1 (ФТ-15, ФТ-16). API должен корректно обрабатывать некорректные переходы (неизвестный ID, перепривязка узла в собственного потомка).
 
 ---
 
@@ -938,53 +869,54 @@ API должен корректно обрабатывать некоррект�
 На первом этапе желательно использовать один crate:
 
 ```text
-freak-engine/
+freak-engine/   (крейт BFGE)
 ├── Cargo.toml
 └── src/
-    ├── lib.rs
+    ├── lib.rs              # публичная поверхность (ре-экспорты)
+    ├── math.rs             # ре-экспорт glam: Vec3, Quat, Mat4
     │
     ├── core/
     │   ├── mod.rs
-    │   ├── engine.rs
-    │   ├── config.rs
-    │   └── error.rs
+    │   ├── api.rs          # EngineApi, ImageListener
+    │   ├── engine.rs       # Engine
+    │   └── error.rs        # EngineError
     │
     ├── scene/
     │   ├── mod.rs
-    │   ├── manager.rs
-    │   ├── node.rs
-    │   ├── transform.rs
-    │   ├── entity.rs
-    │   ├── camera.rs
-    │   ├── light.rs
-    │   └── ids.rs
+    │   ├── api.rs          # SceneApi
+    │   ├── ids.rs          # SceneNodeId, SceneObjectId
+    │   ├── transform.rs    # Transform
+    │   ├── node.rs         # SceneNode
+    │   ├── object.rs       # SceneObject
+    │   ├── viewpoint.rs    # ViewpointState
+    │   ├── manager.rs      # SceneManager (+ build_render_frame)
+    │   └── error.rs        # SceneError
     │
     ├── resources/
     │   ├── mod.rs
-    │   ├── manager.rs
-    │   ├── mesh.rs
-    │   ├── material.rs
-    │   ├── texture.rs
-    │   ├── shader.rs
-    │   └── handle.rs
+    │   ├── handle.rs       # MeshHandle
+    │   ├── mesh.rs         # Vertex, SubMesh, Mesh
+    │   └── manager.rs      # ResourceManager
     │
     ├── systems/
     │   ├── mod.rs
-    │   └── system.rs
+    │   ├── lifecycle.rs    # EngineParts, create/initialize/shutdown, LifecycleError
+    │   ├── loading.rs      # load_model, ModelLoadError
+    │   └── persistence.rs  # SceneStore, save/restore, ScenePersistenceError
     │
     ├── render/
     │   ├── mod.rs
-    │   ├── renderer.rs
-    │   ├── frame.rs
-    │   ├── item.rs
-    │   ├── system.rs
-    │   └── stats.rs
+    │   ├── frame.rs        # RenderFrame, RenderCamera, RenderItem
+    │   ├── renderer.rs     # Renderer
+    │   ├── system.rs       # RenderSystem, RenderOutput, RenderError
+    │   ├── stats.rs        # RenderStats
+    │   └── image.rs        # ImageSize, SceneImage
     │
     └── backend/
         ├── mod.rs
         └── wgpu/
             ├── mod.rs
-            ├── backend.rs
+            ├── backend.rs  # WgpuRenderSystem
             ├── pipeline.rs
             ├── buffer.rs
             └── texture.rs
@@ -1036,49 +968,41 @@ workspace/
 Минимальная рабочая версия должна содержать:
 
 ```text
-Engine
+Engine, EngineApi, ImageListener
 
-SceneManager
-SceneNode
-Transform
+SceneManager, SceneApi
+SceneNode, SceneObject
+Transform, ViewpointState
 
-Entity
-Camera
-
-Mesh
-Material
-
+Mesh, MeshHandle
 ResourceManager
 
-RenderFrame
-RenderItem
+RenderFrame, RenderItem, RenderCamera
 
-Renderer
+Renderer, RenderSystem, WgpuRenderSystem (скелет)
 
-WgpuRenderSystem
+systems::lifecycle (сборка/инициализация/завершение частей), load_model (glTF/OBJ — интерфейс), save/restore сцены (в памяти)
 ```
 
 MVP должен позволять:
 
 ```text
-создать Engine
+создать и инициализировать Engine
 создать SceneNode
-создать Mesh
-создать Entity
-прикрепить Entity к SceneNode
-создать Camera
-прикрепить Camera к SceneNode
-выбрать active camera
-изменить Transform
+создать SceneObject из загруженной модели (load_model)
+изменить Transform узла (объект следует за узлом)
+перепривязать объект к другому узлу
+задать точку обзора
 сформировать RenderFrame
-отрисовать кадр
+отрисовать кадр и получить SceneImage
+сохранить и восстановить сцену (в памяти)
 ```
 
 ---
 
 # 37. UML class diagram
 
-Файл: `docs/architecture/class-diagram.puml`
+Файл: `docs/arch.png` (перегенерировать из блока ниже после правок).
 
 ```plantuml
 @startuml
@@ -1090,53 +1014,54 @@ package Core {
 package Scene {
     class SceneManager
     class SceneNode
+    class SceneObject
+    class Viewpoint
 
-    class Entity
-    class Camera
-    class Light
+    class Transform
+    class SceneNodeId
+    class SceneObjectId
 }
 
 package Resources {
     class ResourceManager
     class Mesh
     class SubMesh
-    class Material
-    class Texture
+    class Vertex
+    class MeshHandle
 }
 
 package Rendering {
-    class ViewPort
+    class RenderFrame
     class RenderItem
+    class RenderCamera
 
     interface RenderSystem
     class Renderer
+    class ImageSize
+    class SceneImage
 }
 
 Engine --> SceneManager
 Engine --> ResourceManager
 Engine --> Renderer
+Engine ..> RenderSystem
 
 SceneManager *-- SceneNode
-
-SceneNode --> Entity
-SceneNode --> Camera
-SceneNode --> Light
-
-Entity --> Mesh
-Entity --> Material
+SceneManager *-- Viewpoint
+SceneNode --> SceneObject : objects
+SceneObject --> MeshHandle
+SceneNode *-- Transform
 
 ResourceManager *-- Mesh
-ResourceManager *-- Material
-ResourceManager *-- Texture
-
 Mesh *-- SubMesh
-Material --> Texture
+SubMesh *-- Vertex
 
-SceneManager ..> ViewPort : builds
-ViewPort *-- RenderItem
+SceneManager ..> RenderFrame : builds
+RenderFrame *-- RenderItem
+RenderFrame *-- RenderCamera
 
 Renderer --> RenderSystem
-Renderer ..> ViewPort
+Renderer ..> RenderFrame
 Renderer --> ResourceManager
 
 @enduml
@@ -1153,40 +1078,29 @@ Renderer --> ResourceManager
 
 participant UI
 participant Engine
-participant SystemManager
 participant SceneManager
-participant Renderer
 participant ResourceManager
+participant Renderer
+participant RenderSystem
 participant GPU
 
-UI -> Engine : update(dt)
+UI -> Engine : initialize / load_model / set_* / save / restore
 
-Engine -> SystemManager : update(scene, dt)
-SystemManager -> SceneManager : modify scene
-SystemManager --> Engine : done
+== внутренний цикл движка ==
 
-UI -> Engine : render()
-
-Engine -> SceneManager : buildRenderFrame()
-
-SceneManager -> SceneManager : traverseSceneGraph()
-SceneManager -> SceneManager : calculateWorldTransforms()
-SceneManager -> SceneManager : determineVisibleObjects()
-
+Engine -> SceneManager : build_render_frame(size)
+SceneManager -> SceneManager : обход графа и мировые трансформации
 SceneManager --> Engine : RenderFrame
 
 Engine -> Renderer : render(frame, resources)
-
 Renderer -> ResourceManager : resolve handles
-ResourceManager --> Renderer : resources
+Renderer -> RenderSystem : render(frame, resources)
+RenderSystem -> GPU : draw commands
+GPU --> RenderSystem : image
+RenderSystem --> Renderer : RenderOutput { stats, image }
+Renderer --> Engine : RenderOutput
 
-Renderer -> GPU : draw commands
-Renderer -> GPU : present
-
-GPU --> Renderer : completion
-
-Renderer --> Engine : RenderStats
-Engine --> UI : Result<RenderStats>
+Engine -> UI : image_ready(&SceneImage)
 
 @enduml
 ```
@@ -1202,7 +1116,7 @@ Engine --> UI : Result<RenderStats>
 
 [*] --> Created
 
-Created --> Initializing : Engine::new()
+Created --> Initializing : Engine::new() / initialize(size)
 
 Initializing --> Ready
 Initializing --> Failed
@@ -1210,13 +1124,13 @@ Initializing --> Failed
 Ready --> Updating : update(dt)
 Updating --> Ready
 
-Ready --> PreparingFrame : render()
+Ready --> PreparingFrame : render() (внутренний шаг цикла)
 
 PreparingFrame --> Rendering
 Rendering --> Presenting
 Presenting --> Ready
 
-Ready --> Resizing : resize()
+Ready --> Resizing : set_image_size()
 Resizing --> Ready
 
 Rendering --> Failed : unrecoverable error
@@ -1233,32 +1147,22 @@ Terminated --> [*]
 
 ---
 
-# 40. UML state diagram Entity
+# 40. UML state diagram объекта сцены
 
-Файл: `docs/architecture/entity-state.puml`
+Файл: `docs/architecture/object-state.puml`
 
 ```plantuml
 @startuml
 
-[*] --> Created : createEntity(mesh)
+[*] --> Attached : load_model(path, parent)
 
-Created --> Detached
-
-Detached --> Attached : attachEntity(node, entity)
-
-Attached --> Detached : detachEntity(entity)
-
-Attached --> Attached : setMaterial(...)
-Attached --> Attached : setVisible(...)
-Attached --> Attached : SceneNode::setTransform(...)
-
-Detached --> Destroyed : removeEntity(entity)
-Attached --> Destroyed : removeEntity(entity)
-
-Destroyed --> [*]
+Attached --> Attached : set_node_transform(...)
+Attached --> Attached : reparent_object(node)
 
 @enduml
 ```
+
+Удаление и скрытие — после v1 (ФТ-15, ФТ-16).
 
 ---
 
@@ -1278,8 +1182,6 @@ component "Scene" as Scene
 component "Systems" as Systems
 component "Resources" as Resources
 
-component "Frame Preparation" as Frame
-
 component "Renderer" as Renderer
 component "Graphics Backend" as Backend
 
@@ -1290,15 +1192,15 @@ API --> Core
 Core --> Scene
 Core --> Systems
 Core --> Resources
+Core --> Renderer
 
 Systems --> Scene
+Systems --> Resources
+Systems --> Renderer : собирает и инициализирует
+Systems --> Backend : создаёт
 
-Core --> Frame
-Scene --> Frame
-Resources --> Frame
-
-Core --> Renderer
-Frame --> Renderer
+Scene --> Resources
+Scene ..> Renderer : RenderFrame
 
 Renderer --> Resources
 Renderer --> Backend
@@ -1341,18 +1243,19 @@ Resources отвечают за:
 Примеры:
 
 ```text
-Mesh
-Material
-Texture
-Shader
+Mesh (геометрия + цвет модели)
+MeshHandle
 ```
+
+Текстуры, материалы, шейдеры — после v1.
 
 ## 42.3. Systems
 
 Systems отвечают за:
 
 ```text
-как меняется состояние сцены
+сборку, инициализацию и завершение частей движка;
+загрузку моделей и save/restore сцены
 ```
 
 ## 42.4. Renderer
@@ -1360,7 +1263,7 @@ Systems отвечают за:
 Renderer отвечает за:
 
 ```text
-как подготовленный RenderFrame превращается в изображение
+как подготовленный RenderFrame превращается в изображение (offscreen: RenderOutput со SceneImage)
 ```
 
 ## 42.5. Engine
@@ -1384,19 +1287,19 @@ UI отвечает за:
 # 43. Главные invariants
 
 1. `SceneNode` отвечает за **WHERE**.
-2. `Entity`, `Camera`, `Light` отвечают за **WHAT**.
-3. `Mesh`, `Material`, `Texture` являются resources.
-4. `Entity` является instance, `Mesh` является resource.
-5. Scene не выполняет GPU-команды.
-6. Renderer не изменяет Scene.
-7. RenderSystem не знает о SceneManager.
-8. UI не знает о GPU backend.
-9. Engine является orchestrator/facade.
-10. Между Scene и Renderer передаётся `RenderFrame`.
-11. Один Mesh может использоваться несколькими Entity.
-12. Transform принадлежит `SceneNode`, а не `Entity`.
-13. Camera и Light получают spatial transform через SceneNode.
-14. Resource handles должны быть strongly typed.
+2. `SceneObject` отвечает за **WHAT**.
+3. `Mesh` является resource, `SceneObject` — instance.
+4. Scene не выполняет GPU-команды.
+5. Renderer не изменяет Scene.
+6. RenderSystem не знает о SceneManager.
+7. UI не знает о GPU backend.
+8. Engine является orchestrator/facade.
+9. Между Scene и Renderer передаётся `RenderFrame`.
+10. Один `Mesh` может использоваться несколькими `SceneObject`.
+11. `Transform` есть только у `SceneNode`; положение объекта определяется его узлом, мировая трансформация вычисляется при сборке кадра.
+12. Точка обзора одна и не входит в иерархию узлов.
+13. Resource handles должны быть strongly typed.
+14. Клиент не удаляет и не скрывает объекты и не переопределяет внешний вид (v1).
 15. Dependency graph не должен иметь циклов.
 
 ---
@@ -1455,13 +1358,13 @@ Scene знает, ЧТО существует и ГДЕ оно находитс�
 
 SceneNode знает WHERE.
 
-Entity / Camera / Light знают WHAT.
+SceneObject знает WHAT.
 
-Resources знают, КАКИЕ разделяемые данные существуют.
+Mesh и MeshHandle знают, КАКИЕ разделяемые данные существуют.
 
-Systems знают, КАК состояние изменяется.
+Systems знают, КАК собрать, инициализировать и завершить части движка, загрузить модель и сохранить/восстановить сцену.
 
-Frame Preparation знает, ЧТО должно попасть в конкретный кадр.
+build_render_frame знает, ЧТО должно попасть в конкретный кадр.
 
 Renderer знает, КАК превратить кадр в GPU-команды.
 
@@ -1473,4 +1376,3 @@ UI знает, ЧТО пользователь хочет сделать.
 ```
 
 ---
-
