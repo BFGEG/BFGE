@@ -427,12 +427,13 @@ pub struct Light {
 
 ## 13.1. Назначение
 
-Resources отвечают за разделяемые данные моделей (в v1 — геометрия и общий простой цвет модели).
+Resources отвечают за разделяемые данные моделей (в v1 — геометрия и общий простой цвет модели) и библиотеку встроенных мешей (§13.3).
 
 ## 13.2. Основные сущности
 
 ```text
 ResourceManager
+MeshLibrary
 Mesh
 SubMesh
 Vertex
@@ -441,6 +442,16 @@ MeshHandle
 
 `Material`, `Texture`, `Shader` — после v1.
 
+## 13.3. Встроенные меши
+
+Помимо мешей, загруженных из файлов, `resources` владеет библиотекой встроенных (готовых) мешей для быстрого создания стандартных геометрических фигур. Такие меши строятся средствами движка процедурно и не требуют файла модели.
+
+- Встроенный меш устроен так же, как загруженный: `Mesh` + `SubMesh` + `Vertex` + `MeshHandle`; для сцены и рендера разницы нет.
+- Форма может быть составной и сложной (несколько `SubMesh`), но остаётся одним `Mesh`.
+- Конкретный перечень фигур, их разбиение на `SubMesh` и способ построения архитектурой не фиксируются — это решение разработчиков.
+- Библиотеку хранит `ResourceManager` (§14) в виде `MeshLibrary`.
+- Для клиента в v1 доступен только `load_model`; создание объекта из встроенного меша — после v1 (ФТ-23), как и ручное создание модели.
+
 ---
 
 # 14. `ResourceManager`
@@ -448,6 +459,7 @@ MeshHandle
 ```rust
 pub struct ResourceManager {
     meshes: Vec<Mesh>,
+    library: MeshLibrary,
 }
 ```
 
@@ -517,6 +529,8 @@ SceneNode
 ```
 
 `Material`, `Texture`, `Shader` добавляются после v1 по той же схеме (ресурс ≠ экземпляр).
+
+Встроенные меши (§13.3) подчиняются тому же правилу: `Mesh` — ресурс, `SceneObject` — экземпляр; встроенный меш не отличается от загруженного.
 
 ---
 
@@ -781,6 +795,8 @@ impl ResourceManager {
 }
 ```
 
+Библиотека встроенных мешей (§13.3) доступна внутри движка через тот же интерфейс; её содержимое — внутренняя деталь.
+
 Загрузка текстур и создание материалов — после v1.
 
 ---
@@ -974,6 +990,7 @@ freak-engine/   (крейт BFGE)
     │   ├── mod.rs
     │   ├── handle.rs       # MeshHandle
     │   ├── mesh.rs         # Vertex, SubMesh, Mesh
+    │   ├── library.rs      # MeshLibrary (встроенные меши, §13.3)
     │   └── manager.rs      # ResourceManager
     │
     ├── systems/
@@ -1104,6 +1121,7 @@ package Scene {
 
 package Resources {
     class ResourceManager
+    class MeshLibrary
     class Mesh
     class SubMesh
     class Vertex
@@ -1135,6 +1153,7 @@ SceneObject --> MeshHandle
 SceneNode *-- Transform
 
 ResourceManager *-- Mesh
+ResourceManager *-- MeshLibrary
 Mesh *-- SubMesh
 SubMesh *-- Vertex
 
@@ -1333,6 +1352,7 @@ Resources отвечают за:
 ```text
 Mesh (геометрия + цвет модели)
 MeshHandle
+встроенные меши стандартных фигур (MeshLibrary, §13.3)
 ```
 
 Текстуры, материалы, шейдеры — после v1.
