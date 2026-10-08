@@ -65,7 +65,7 @@
                     wgpu (backend) --> GPU
 ```
 
-`Systems` собирает, инициализирует и завершает части движка (`systems::lifecycle`), загружает модели и хранит сохранённую сцену.
+`Systems` собирает, инициализирует и завершает части движка (`systems::lifecycle`), загружает модели и хранит сохранённую сцену. Сборку, инициализацию и завершение выполняет `systems::lifecycle`; порядок шагов рабочего цикла задаёт главный цикл движка `EngineLoop` в `core` (§4.6).
 
 ---
 
@@ -92,6 +92,7 @@
 - инициализировать и завершать подсистемы (через `systems::lifecycle`);
 - владеть или координировать основные модули;
 - предоставлять публичную точку входа;
+- владеть главным циклом движка (`EngineLoop`, §4.6) и порядком его шагов;
 - выполнять `update`;
 - инициировать `render`;
 - управлять lifecycle движка;
@@ -115,8 +116,11 @@ pub struct Engine {
     resources: ResourceManager,
     renderer: Renderer,
     systems: SystemManager,
+    event_loop: EngineLoop,
 }
 ```
+
+Поле называется `event_loop`, а не `loop`: `loop` — ключевое слово Rust и не может быть именем поля.
 
 ## 4.5. Минимальный публичный API
 
@@ -125,13 +129,86 @@ impl Engine {
     pub fn new() -> Self;
 
     // Публичные операции — трейт EngineApi (FREAK_Engine_Public_API.md);
-    // initialize/shutdown выполняются через systems::lifecycle.
+    // initialize/shutdown выполняются через systems::lifecycle
+    // и не являются событиями цикла (§4.6).
 
-    // Внутренний цикл отображения:
+    // Шаги главного цикла движка (EngineLoop, §4.6):
     fn update(&mut self, dt: Duration) -> Result<(), EngineError>;
     fn render(&mut self) -> Result<(), EngineError>;
 }
 ```
+
+## 4.6. Главный цикл движка (`EngineLoop`)
+
+`core` содержит главный цикл движка — `EngineLoop`
+
+`EngineLoop` — один последовательный цикл. Он владеет порядком шагов и не является шиной событий (event bus): публикация и подписка, произвольные подписчики и асинхронная доставка не вводятся (см. §35).
+
+Цикл работает только в состоянии `Ready` (§39) и не выполняет инициализацию и завершение: циклу нужны уже собранные и инициализированные части. Их собирает, инициализирует и завершает `systems::lifecycle` (`create`, `initialize`, `shutdown`, §18) по вызову `Engine::initialize`/`Engine::shutdown`; `EngineLoop` в этих переходах не участвует.
+
+Один проход цикла:
+
+```text
+применить поступившие запросы клиента к сцене и ресурсам
+        |
+        v
+update(dt) — обновление состояния
+        |
+        v
+build_render_frame() — сборка кадра
+        |
+        v
+render() — отрисовка через Renderer/RenderSystem
+        |
+        v
+доставить SceneImage получателю (ImageListener)
+        |
+        v
+ожидание следующего прохода (Tick)
+```
+
+Входные события цикла описаны типом `EngineEvent`. Основные события:
+
+| Группа         | Событие                                                            | Источник                                  | Действие цикла                                     |
+| -------------- | ------------------------------------------------------------------ | ----------------------------------------- | -------------------------------------------------- |
+| Запрос клиента | `CreateNode`, `SetNodeTransform`, `ReparentObject`, `SetViewpoint` | `SceneApi`                                | применить изменение к сцене                        |
+| Запрос клиента | `LoadModel(path, parent)`                                          | `EngineApi::load_model`                   | файловая операция `systems::loading`               |
+| Запрос клиента | `SetImageSize(size)`                                               | `EngineApi::set_image_size`               | изменить размер изображения                        |
+| Запрос клиента | `SaveScene`, `RestoreScene`                                        | `EngineApi::save_scene` / `restore_scene` | файловая операция `systems::persistence`           |
+| Кадр           | `Tick(dt)`                                                         | сам цикл                                  | выполнить проход: `update`, сборка кадра, `render` |
+
+Уведомление `ImageListener::image_ready(&SceneImage)` — результат прохода, а не вариант `EngineEvent`: цикл вызывает получателя напрямую (§21, §31).
+
+```rust
+pub struct EngineLoop {
+    events: VecDeque<EngineEvent>,
+    running: bool,
+}
+
+/// Входные события главного цикла: запросы клиента и шаги кадра.
+pub enum EngineEvent {
+    // Запросы клиента
+    CreateNode { parent: SceneNodeId },
+    SetNodeTransform { node: SceneNodeId, transform: Transform },
+    ReparentObject { object: SceneObjectId, new_parent: SceneNodeId },
+    SetViewpoint(ViewpointState),
+    LoadModel { path: PathBuf, parent: SceneNodeId },
+    SetImageSize(ImageSize),
+    SaveScene,
+    RestoreScene,
+
+    // Кадр
+    Tick(Duration),
+}
+```
+
+Правила:
+
+- запросы клиента применяются в том порядке, в котором они поступили; кадр строится по состоянию на начало прохода;
+- ошибки шага не передаются событиями: они возвращаются через `Result` соответствующей операции (`EngineError`, `SceneError`, `ModelLoadError`, `ScenePersistenceError`, `LifecycleError`, §18); ошибка шага не отменяет уже применённые запросы и не останавливает цикл, если ошибка не является неустранимой (§39);
+- цикл — единственное место, где задаётся порядок вызовов подсистем в рабочем режиме (§42.5); модули `scene`, `resources`, `render` и `systems` о цикле не знают.
+
+Фоновой многопоточности, асинхронного исполнения и собственных систем клиента в v1 нет: `EngineLoop` — простое последовательное исполнение (см. §35).
 
 ---
 
@@ -809,7 +886,7 @@ let output = renderer.render(
 
 # 31. Lifecycle одного кадра
 
-`update`/`render` — внутренние шаги цикла движка; клиент их не вызывает.
+`update`/`render` — внутренние шаги главного цикла движка (`EngineLoop`, §4.6); клиент их не вызывает.
 
 ```text
 Idle
@@ -879,6 +956,7 @@ freak-engine/   (крейт BFGE)
     │   ├── mod.rs
     │   ├── api.rs          # EngineApi, ImageListener
     │   ├── engine.rs       # Engine
+    │   ├── engine_loop.rs  # EngineLoop, EngineEvent
     │   └── error.rs        # EngineError
     │
     ├── scene/
@@ -968,20 +1046,20 @@ workspace/
 Минимальная рабочая версия должна содержать:
 
 ```text
-Engine, EngineApi, ImageListener
+Engine, EngineLoop, EngineEvent, EngineApi, ImageListener
 
 SceneManager, SceneApi
 SceneNode, SceneObject
 Transform, ViewpointState
 
 Mesh, MeshHandle
-ResourceManager
+ResourceManager (разделяемые меши, включая библиотеку встроенных мешей — §13.3)
 
 RenderFrame, RenderItem, RenderCamera
 
 Renderer, RenderSystem, WgpuRenderSystem (скелет)
 
-systems::lifecycle (сборка/инициализация/завершение частей), load_model (glTF/OBJ — интерфейс), save/restore сцены (в памяти)
+systems::lifecycle (сборка/инициализация/завершение частей), load_model (glTF/OBJ — интерфейс), save/restore сцены (в памяти, сериализация — §18.1)
 ```
 
 MVP должен позволять:
@@ -1009,6 +1087,8 @@ MVP должен позволять:
 
 package Core {
     class Engine
+    class EngineLoop
+    class EngineEvent
 }
 
 package Scene {
@@ -1045,6 +1125,8 @@ Engine --> SceneManager
 Engine --> ResourceManager
 Engine --> Renderer
 Engine ..> RenderSystem
+Engine --> EngineLoop
+EngineLoop ..> EngineEvent
 
 SceneManager *-- SceneNode
 SceneManager *-- Viewpoint
@@ -1078,16 +1160,22 @@ Renderer --> ResourceManager
 
 participant UI
 participant Engine
+participant EngineLoop
 participant SceneManager
 participant ResourceManager
 participant Renderer
 participant RenderSystem
 participant GPU
 
-UI -> Engine : initialize / load_model / set_* / save / restore
+UI -> Engine : initialize / shutdown
+Engine -> Engine : systems::lifecycle (create / initialize / shutdown)
 
-== внутренний цикл движка ==
+UI -> Engine : load_model / set_* / save / restore
+Engine -> EngineLoop : событие запроса (EngineEvent)
 
+== главный цикл движка (EngineLoop) ==
+
+EngineLoop -> Engine : Tick(dt)
 Engine -> SceneManager : build_render_frame(size)
 SceneManager -> SceneManager : обход графа и мировые трансформации
 SceneManager --> Engine : RenderFrame
@@ -1274,6 +1362,8 @@ Engine отвечает за:
 когда и в каком порядке вызываются подсистемы
 ```
 
+Главный цикл движка (`EngineLoop`, §4.6) — конкретная реализация этого порядка в рабочем режиме внутри `core`; сборку, инициализацию и завершение частей выполняет `systems::lifecycle` (§18).
+
 ## 42.6. UI
 
 UI отвечает за:
@@ -1362,7 +1452,9 @@ SceneObject знает WHAT.
 
 Mesh и MeshHandle знают, КАКИЕ разделяемые данные существуют.
 
-Systems знают, КАК собрать, инициализировать и завершить части движка, загрузить модель и сохранить/восстановить сцену.
+Systems знают, КАК собрать, инициализировать и завершить части движка, загрузить модель и сохранить/восстановить сцену (включая её сериализацию).
+
+EngineLoop знает, КОГДА и В КАКОМ ПОРЯДКЕ применяются запросы, обновляется состояние и строится кадр.
 
 build_render_frame знает, ЧТО должно попасть в конкретный кадр.
 
