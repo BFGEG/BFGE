@@ -134,6 +134,9 @@ impl Engine {
 
     // Шаги главного цикла движка (EngineLoop, §4.6):
     fn update(&mut self, dt: Duration) -> Result<(), EngineError>;
+    
+    fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError>;
+    
     fn render(&mut self) -> Result<(), EngineError>;
 }
 ```
@@ -183,7 +186,8 @@ pub struct EventTime {
 }
 
 pub struct EngineEvent {
-    callback: Box<dyn FnMut(&EventTime)>,
+    frame_started: Box<dyn FnMut(&EventTime)>,
+    frame_ended: Box<dyn FnMut(&EventTime)>,
 }
 ```
 
