@@ -134,6 +134,9 @@ impl Engine {
 
     // Шаги главного цикла движка (EngineLoop, §4.6):
     fn update(&mut self, dt: Duration) -> Result<(), EngineError>;
+    
+    fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError>;
+    
     fn render(&mut self) -> Result<(), EngineError>;
 }
 ```
@@ -169,15 +172,7 @@ render() — отрисовка через Renderer/RenderSystem
 
 Входные события цикла описаны типом `EngineEvent`. Основные события:
 
-| Группа         | Событие                                                            | Источник                                  | Действие цикла                                     |
-| -------------- | ------------------------------------------------------------------ | ----------------------------------------- | -------------------------------------------------- |
-| Запрос клиента | `CreateNode`, `SetNodeTransform`, `ReparentObject`, `SetViewpoint` | `SceneApi`                                | применить изменение к сцене                        |
-| Запрос клиента | `LoadModel(path, parent)`                                          | `EngineApi::load_model`                   | файловая операция `systems::loading`               |
-| Запрос клиента | `SetImageSize(size)`                                               | `EngineApi::set_image_size`               | изменить размер изображения                        |
-| Запрос клиента | `SaveScene`, `RestoreScene`                                        | `EngineApi::save_scene` / `restore_scene` | файловая операция `systems::persistence`           |
-| Кадр           | `Tick(dt)`                                                         | сам цикл                                  | выполнить проход: `update`, сборка кадра, `render` |
-
-Уведомление `ImageListener::image_ready(&SceneImage)` — результат прохода, а не вариант `EngineEvent`: цикл вызывает получателя напрямую (§21, §31).
+Уведомление `ImageListener::image_ready(&SceneImage)` — результат прохода, а не вариант `EngineEvent`: цикл вызывает получателя напрямую (§21, §31). Пользователь сам определяет callback функции.
 
 ```rust
 pub struct EngineLoop {
@@ -185,20 +180,14 @@ pub struct EngineLoop {
     running: bool,
 }
 
-/// Входные события главного цикла: запросы клиента и шаги кадра.
-pub enum EngineEvent {
-    // Запросы клиента
-    CreateNode { parent: SceneNodeId },
-    SetNodeTransform { node: SceneNodeId, transform: Transform },
-    ReparentObject { object: SceneObjectId, new_parent: SceneNodeId },
-    SetViewpoint(ViewpointState),
-    LoadModel { path: PathBuf, parent: SceneNodeId },
-    SetImageSize(ImageSize),
-    SaveScene,
-    RestoreScene,
+pub struct EventTime {
+    time_since_last_event: f32,
+    time_since_last_frame: f32,
+}
 
-    // Кадр
-    Tick(Duration),
+pub struct EngineEvent {
+    frame_started: Box<dyn FnMut(&EventTime)>,
+    frame_ended: Box<dyn FnMut(&EventTime)>,
 }
 ```
 
