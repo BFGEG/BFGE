@@ -1,7 +1,7 @@
 //! Scene storage and management.
 
+use crate::platform::WindowSize;
 use crate::render::frame::RenderFrame;
-use crate::render::image::ImageSize;
 use crate::resources::handle::MeshHandle;
 use crate::scene::api::SceneApi;
 use crate::scene::error::SceneError;
@@ -44,7 +44,7 @@ impl SceneManager {
     /// Builds a frame: tree traversal, world transforms, camera from the
     /// viewpoint and the image size.
     #[allow(dead_code)] // called by [CORE]
-    pub(crate) fn build_render_frame(&self, _size: ImageSize) -> RenderFrame {
+    pub(crate) fn build_render_frame(&self, _size: WindowSize) -> RenderFrame {
         todo!("milestone 2")
     }
 

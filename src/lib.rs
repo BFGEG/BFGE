@@ -10,17 +10,17 @@
 pub mod backend;
 pub mod core;
 pub mod math;
+pub mod platform;
 pub mod render;
 pub mod resources;
 pub mod scene;
 pub mod systems;
 
-pub use crate::core::api::{EngineApi, ImageListener};
+pub use crate::core::api::EngineApi;
 pub use crate::core::engine::Engine;
+pub use crate::core::engine_loop::{EngineEvent, EventTime};
 pub use crate::core::error::EngineError;
-pub use crate::render::image::{ImageSize, SceneImage};
-pub use crate::render::stats::RenderStats;
-pub use crate::render::system::RenderError;
+pub use crate::platform::{WindowDescriptor, WindowSize};
 pub use crate::scene::api::SceneApi;
 pub use crate::scene::error::SceneError;
 pub use crate::scene::ids::{SceneNodeId, SceneObjectId};

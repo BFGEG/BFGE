@@ -3,9 +3,10 @@
 use std::path::Path;
 use std::time::Duration;
 
-use crate::core::api::{EngineApi, ImageListener};
+use crate::core::api::EngineApi;
+use crate::core::engine_loop::{EngineEvent, EngineLoop};
 use crate::core::error::EngineError;
-use crate::render::image::ImageSize;
+use crate::platform::{PlatformAdapter, WindowDescriptor, WindowSize};
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::systems::lifecycle::{self, EngineParts};
@@ -13,12 +14,11 @@ use crate::systems::loading::{self, ModelLoadError};
 use crate::systems::persistence::{self, ScenePersistenceError};
 
 /// Engine facade and orchestrator: links the scene, resources, systems,
-/// renderer and the frame lifecycle.
+/// renderer, window and the frame lifecycle.
 pub struct Engine {
     parts: EngineParts,
-    #[allow(dead_code)] // consumed by EngineLoop (milestone 2)
-    image_listener: Option<Box<dyn ImageListener>>,
-    image_size: Option<ImageSize>,
+    event_loop: EngineLoop,
+    platform: Option<PlatformAdapter>,
 }
 
 impl Engine {
@@ -26,8 +26,8 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             parts: lifecycle::create(),
-            image_listener: None,
-            image_size: None,
+            event_loop: EngineLoop::default(),
+            platform: None,
         }
     }
 
@@ -49,21 +49,34 @@ impl Default for Engine {
 }
 
 impl EngineApi for Engine {
-    fn initialize(&mut self, initial_image_size: ImageSize) -> Result<(), EngineError> {
-        if self.image_size.is_some() {
+    fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError> {
+        if self.platform.is_some() {
             return Err(EngineError::AlreadyInitialized);
         }
-        lifecycle::initialize(&mut self.parts, initial_image_size)?;
-        self.image_size = Some(initial_image_size);
+        let platform = PlatformAdapter::new(window)?;
+        lifecycle::initialize(&mut self.parts, platform.window())?;
+        self.platform = Some(platform);
+        Ok(())
+    }
+
+    fn run(&mut self) -> Result<(), EngineError> {
+        if self.platform.is_none() {
+            return Err(EngineError::NotInitialized);
+        }
+        todo!("milestone 2")
+    }
+
+    fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError> {
+        self.event_loop.add_event(event);
         Ok(())
     }
 
     fn shutdown(&mut self) -> Result<(), EngineError> {
-        if self.image_size.is_none() {
+        if self.platform.is_none() {
             return Err(EngineError::NotInitialized);
         }
         lifecycle::shutdown(&mut self.parts)?;
-        self.image_size = None;
+        self.platform = None;
         Ok(())
     }
 
@@ -84,17 +97,11 @@ impl EngineApi for Engine {
         )
     }
 
-    fn set_image_size(&mut self, size: ImageSize) -> Result<(), EngineError> {
-        if self.image_size.is_none() {
-            return Err(EngineError::NotInitialized);
-        }
-        self.parts.renderer.resize(size)?;
-        self.image_size = Some(size);
+    fn set_window_size(&mut self, size: WindowSize) -> Result<(), EngineError> {
+        let platform = self.platform.as_mut().ok_or(EngineError::NotInitialized)?;
+        platform.set_window_size(size)?;
+        self.parts.renderer.set_window_size(size)?;
         Ok(())
-    }
-
-    fn set_image_listener(&mut self, listener: Box<dyn ImageListener>) {
-        self.image_listener = Some(listener);
     }
 
     fn save_scene(&mut self) -> Result<(), ScenePersistenceError> {
