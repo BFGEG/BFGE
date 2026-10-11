@@ -51,19 +51,21 @@ impl Default for Engine {
 impl EngineApi for Engine {
     fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError> {
         if self.platform.is_some() {
-            return Err(EngineError::AlreadyInitialized);
+            Err(EngineError::AlreadyInitialized)
+        } else {
+            let platform = PlatformAdapter::new(window)?;
+            lifecycle::initialize(&mut self.parts, platform.window())?;
+            self.platform = Some(platform);
+            Ok(())
         }
-        let platform = PlatformAdapter::new(window)?;
-        lifecycle::initialize(&mut self.parts, platform.window())?;
-        self.platform = Some(platform);
-        Ok(())
     }
 
     fn run(&mut self) -> Result<(), EngineError> {
         if self.platform.is_none() {
-            return Err(EngineError::NotInitialized);
+            Err(EngineError::NotInitialized)
+        } else {
+            Err(EngineError::RunUnavailable)
         }
-        todo!("milestone 2")
     }
 
     fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError> {
@@ -73,11 +75,12 @@ impl EngineApi for Engine {
 
     fn shutdown(&mut self) -> Result<(), EngineError> {
         if self.platform.is_none() {
-            return Err(EngineError::NotInitialized);
+            Err(EngineError::NotInitialized)
+        } else {
+            lifecycle::shutdown(&mut self.parts)?;
+            self.platform = None;
+            Ok(())
         }
-        lifecycle::shutdown(&mut self.parts)?;
-        self.platform = None;
-        Ok(())
     }
 
     fn scene(&mut self) -> &mut dyn SceneApi {

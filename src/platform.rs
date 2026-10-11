@@ -1,5 +1,7 @@
 //! Window and platform adapter owned by the engine.
 
+const WINDOW_CREATION_UNAVAILABLE: &str = "window creation is not implemented";
+
 /// Window size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowSize {
@@ -55,7 +57,9 @@ pub struct PlatformAdapter {
 impl PlatformAdapter {
     /// Creates the window and the platform adapter.
     pub(crate) fn new(_descriptor: WindowDescriptor) -> Result<Self, PlatformError> {
-        todo!("window creation: milestone 2")
+        Err(PlatformError::WindowCreation(
+            WINDOW_CREATION_UNAVAILABLE.to_owned(),
+        ))
     }
 
     /// Returns the engine's window.
