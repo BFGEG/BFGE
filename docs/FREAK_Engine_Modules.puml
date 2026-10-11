@@ -17,7 +17,7 @@ component "Графическая платформа" as Backend
 component "Окно" as Window
 node "Графический процессор" as GPU
 
-Client --> API : запросы и наблюдение\nсцены в окне
+Client --> API : запросы, обработчики кадра\nи наблюдение сцены в окне
 API --> Engine : передать запрос
 Engine --> API : результаты и ошибки
 
