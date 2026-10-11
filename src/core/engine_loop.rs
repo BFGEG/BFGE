@@ -24,6 +24,11 @@ impl EngineLoop {
     pub(crate) fn add_event(&mut self, event: EngineEvent) {
         self.callbacks.push(event);
     }
+
+    #[cfg(test)]
+    pub(super) fn callbacks(&mut self) -> &mut [EngineEvent] {
+        &mut self.callbacks
+    }
 }
 
 /// Internal loop event, crate-private: not part of the public API.
