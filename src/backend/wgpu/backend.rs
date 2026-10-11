@@ -6,6 +6,11 @@ use crate::render::stats::RenderStats;
 use crate::render::system::{RenderError, RenderSystem};
 use crate::resources::manager::ResourceManager;
 
+const INITIALIZATION_UNAVAILABLE: &str = "wgpu initialization is not implemented (issue #10)";
+const RESIZE_UNAVAILABLE: &str = "wgpu surface resizing is not implemented (issue #10)";
+const RENDERING_UNAVAILABLE: &str =
+    "wgpu rendering and presentation are not implemented (issue #10)";
+
 /// Graphics system based on wgpu.
 ///
 /// Actual wgpu initialization and rendering are the next milestone.
@@ -21,11 +26,13 @@ impl WgpuRenderSystem {
 
 impl RenderSystem for WgpuRenderSystem {
     fn initialize(&mut self, _window: &Window) -> Result<(), RenderError> {
-        todo!("wgpu: milestone 2")
+        Err(RenderError::Initialization(
+            INITIALIZATION_UNAVAILABLE.to_owned(),
+        ))
     }
 
     fn set_window_size(&mut self, _size: WindowSize) -> Result<(), RenderError> {
-        todo!("wgpu: milestone 2")
+        Err(RenderError::Render(RESIZE_UNAVAILABLE.to_owned()))
     }
 
     fn render(
@@ -33,7 +40,7 @@ impl RenderSystem for WgpuRenderSystem {
         _frame: &RenderFrame,
         _resources: &ResourceManager,
     ) -> Result<RenderStats, RenderError> {
-        todo!("wgpu: milestone 2")
+        Err(RenderError::Render(RENDERING_UNAVAILABLE.to_owned()))
     }
 
     fn shutdown(&mut self) {}
