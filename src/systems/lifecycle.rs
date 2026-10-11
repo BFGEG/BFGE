@@ -1,6 +1,6 @@
 //! Assembly, initialization and shutdown of engine parts.
 
-use crate::render::image::ImageSize;
+use crate::platform::Window;
 use crate::render::renderer::Renderer;
 use crate::render::system::RenderError;
 use crate::resources::manager::ResourceManager;
@@ -27,12 +27,13 @@ pub fn create() -> EngineParts {
     todo!("milestone 2")
 }
 
-/// Initializes the graphics system and sets the image size.
+/// Initializes the graphics system and creates a render surface for the
+/// engine's window.
 ///
 /// # Errors
 ///
 /// Returns [`LifecycleError`] on initialization failure.
-pub fn initialize(_parts: &mut EngineParts, _image_size: ImageSize) -> Result<(), LifecycleError> {
+pub fn initialize(_parts: &mut EngineParts, _window: &Window) -> Result<(), LifecycleError> {
     todo!("milestone 2")
 }
 

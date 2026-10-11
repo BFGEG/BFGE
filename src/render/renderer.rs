@@ -1,8 +1,9 @@
 //! Owner of the graphics system.
 
+use crate::platform::{Window, WindowSize};
 use crate::render::frame::RenderFrame;
-use crate::render::image::ImageSize;
-use crate::render::system::{RenderError, RenderOutput, RenderSystem};
+use crate::render::stats::RenderStats;
+use crate::render::system::{RenderError, RenderSystem};
 use crate::resources::manager::ResourceManager;
 
 /// Owner of the graphics system.
@@ -17,13 +18,13 @@ impl Renderer {
     }
 
     /// # Errors - see [`RenderSystem::initialize`].
-    pub fn initialize(&mut self) -> Result<(), RenderError> {
-        self.render_system.initialize()
+    pub fn initialize(&mut self, window: &Window) -> Result<(), RenderError> {
+        self.render_system.initialize(window)
     }
 
-    /// # Errors - see [`RenderSystem::resize`].
-    pub fn resize(&mut self, size: ImageSize) -> Result<(), RenderError> {
-        self.render_system.resize(size)
+    /// # Errors - see [`RenderSystem::set_window_size`].
+    pub fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
+        self.render_system.set_window_size(size)
     }
 
     /// # Errors - see [`RenderSystem::render`].
@@ -31,7 +32,7 @@ impl Renderer {
         &mut self,
         frame: &RenderFrame,
         resources: &ResourceManager,
-    ) -> Result<RenderOutput, RenderError> {
+    ) -> Result<RenderStats, RenderError> {
         self.render_system.render(frame, resources)
     }
 
