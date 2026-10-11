@@ -14,11 +14,12 @@ artifact "Кадр отображения" as Frame
 component "Обработчик отображения" as Renderer
 component "Графическая система\nотображения" as RenderSystem
 component "Графическая платформа" as Backend
+component "Окно" as Window
 node "Графический процессор" as GPU
 
-Client --> API : запросы и получение\nизображения
+Client --> API : запросы и наблюдение\nсцены в окне
 API --> Engine : передать запрос
-Engine --> API : изображение, уведомления,\nрезультаты и ошибки
+Engine --> API : результаты и ошибки
 
 Engine --> Scene : изменения и чтение сцены
 Engine --> Resources : доступ к данным моделей
@@ -32,14 +33,16 @@ Scene --> Preparation : узлы, объекты,\nточка обзора
 Resources --> Preparation : геометрия и цвет
 Preparation --> Frame : собрать кадр
 Frame --> Renderer : состояние сцены
-Engine --> Renderer : размер изображения
+Engine --> Window : создаёт и управляет
+Engine --> Renderer : размер окна
 Resources --> Renderer : данные для изображения
 Renderer --> RenderSystem : запрос отображения
 RenderSystem --> Backend : графические команды
 Backend --> GPU : команды для создания\nизображения
 GPU --> Backend : изображение
 Backend --> RenderSystem : результат отображения
+RenderSystem --> Window : показ изображения\n(present)
 RenderSystem --> Renderer : результат или ошибка
-Renderer --> Engine : новое изображение\nили ошибка
+Renderer --> Engine : результат или ошибка
 
 @enduml

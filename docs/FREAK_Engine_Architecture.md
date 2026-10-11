@@ -30,6 +30,7 @@
 8. Циклические зависимости между архитектурными модулями не допускаются.
 9. Обратная передача данных должна происходить через возвращаемые значения, события или специализированные структуры данных.
 10. Публичный API должен оперировать объектами предметной области, а не низкоуровневыми GPU-командами.
+11. В первой версии сцена показывается в окне, которым владеет движок; клиент не управляет оконной и графической платформой.
 
 ---
 
@@ -65,7 +66,7 @@
                     wgpu (backend) --> GPU
 ```
 
-`Systems` собирает, инициализирует и завершает части движка (`systems::lifecycle`), загружает модели и хранит сохранённую сцену. Сборку, инициализацию и завершение выполняет `systems::lifecycle`; порядок шагов рабочего цикла задаёт главный цикл движка `EngineLoop` в `core` (§4.6).
+`Systems` собирает, инициализирует и завершает части движка (`systems::lifecycle`), загружает модели и хранит сохранённую сцену. Сборку, инициализацию и завершение выполняет `systems::lifecycle`; порядок шагов рабочего цикла задаёт главный цикл движка `EngineLoop` в `core` (§4.6). Готовый кадр показывает backend: он создаёт поверхность для окна движка и представляет в нём результат (`.present()`, §23).
 
 ---
 
@@ -93,6 +94,7 @@
 - владеть или координировать основные модули;
 - предоставлять публичную точку входа;
 - владеть главным циклом движка (`EngineLoop`, §4.6) и порядком его шагов;
+- владеть окном движка и его циклом событий (`platform`, §4.6);
 - выполнять `update`;
 - инициировать `render`;
 - управлять lifecycle движка;
@@ -117,10 +119,13 @@ pub struct Engine {
     renderer: Renderer,
     systems: SystemManager,
     event_loop: EngineLoop,
+    platform: PlatformAdapter,
 }
 ```
 
 Поле называется `event_loop`, а не `loop`: `loop` — ключевое слово Rust и не может быть именем поля.
+
+`platform` (`platform::PlatformAdapter`) владеет окном движка и доставляет события окна (закрытие, изменение размера). Окно создаёт движок; клиент не видит ни оконную, ни графическую платформу (§25).
 
 ## 4.5. Минимальный публичный API
 
@@ -132,22 +137,28 @@ impl Engine {
     // initialize/shutdown выполняются через systems::lifecycle
     // и не являются событиями цикла (§4.6).
 
+    // Запускает главный цикл движка поверх цикла событий окна.
+    // Работает, пока окно не закрыто; клиент не вызывает update/render.
+    pub fn run(&mut self) -> Result<(), EngineError>;
+
     // Шаги главного цикла движка (EngineLoop, §4.6):
     fn update(&mut self, dt: Duration) -> Result<(), EngineError>;
-    
+
     fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError>;
-    
+
     fn render(&mut self) -> Result<(), EngineError>;
 }
 ```
 
 ## 4.6. Главный цикл движка (`EngineLoop`)
 
-`core` содержит главный цикл движка — `EngineLoop`. В требованиях и публичном API он называется «цикл отображения»; в архитектуре используется название «главный цикл движка», потому что он охватывает не только отрисовку, но и приём запросов, обновление состояния и доставку изображения клиенту. Оба названия обозначают один и тот же объект.
+`core` содержит главный цикл движка — `EngineLoop`. В требованиях и публичном API он называется «цикл отображения»; в архитектуре используется название «главный цикл движка», потому что он охватывает не только отрисовку, но и приём запросов, обновление состояния и показ сцены в окне. Оба названия обозначают один и тот же объект.
 
 `EngineLoop` — один последовательный цикл. Он владеет порядком шагов и не является шиной событий (event bus): публикация и подписка, произвольные подписчики и асинхронная доставка не вводятся (см. §35).
 
 Цикл работает только в состоянии `Ready` (§39) и не выполняет инициализацию и завершение: циклу нужны уже собранные и инициализированные части. Их собирает, инициализирует и завершает `systems::lifecycle` (`create`, `initialize`, `shutdown`, §18) по вызову `Engine::initialize`/`Engine::shutdown`; `EngineLoop` в этих переходах не участвует.
+
+Цикл работает поверх цикла событий окна, которым владеет движок (`platform::PlatformAdapter`, §4.4): окно создаётся при инициализации, а его события — закрытие и изменение размера — поступают в цикл. Закрытие окна завершает показ и переводит движок в `ShuttingDown` (§39). Клиент не создаёт окно и не управляет циклом событий.
 
 Один проход цикла:
 
@@ -158,16 +169,13 @@ impl Engine {
 update(dt) — обновление состояния
         |
         v
-build_render_frame() — сборка кадра
+build_render_frame(size) — сборка кадра
         |
         v
-render() — отрисовка через Renderer/RenderSystem
+render() — отрисовка через Renderer/RenderSystem и показ кадра в окне (present)
         |
         v
-доставить SceneImage получателю (ImageListener)
-        |
-        v
-ожидание следующего прохода (Tick)
+ожидание следующего прохода (Tick) или события окна
 ```
 
 Входные события цикла описаны типом `EngineEvent`. Основные события:
@@ -539,7 +547,7 @@ pub fn create() -> EngineParts;
 
 pub fn initialize(
     parts: &mut EngineParts,
-    image_size: ImageSize,
+    window: &Window,
 ) -> Result<(), LifecycleError>;
 
 pub fn shutdown(parts: &mut EngineParts) -> Result<(), LifecycleError>;
@@ -566,7 +574,7 @@ pub fn restore_scene(
 ) -> Result<(), ScenePersistenceError>;
 ```
 
-`create` собирает части, `initialize` инициализирует графику и задаёт размер изображения, `shutdown` завершает работу; ошибки жизненного цикла — `LifecycleError`. В первой версии сохранение хранится в памяти движка; формат файла — после v1.
+`create` собирает части, `initialize` инициализирует графику и создаёт поверхность отображения для окна движка, `shutdown` завершает работу; ошибки жизненного цикла — `LifecycleError`. Окно создаёт и хранит движок (`platform`, §4.4) и передаёт его в `initialize`. В первой версии сохранение хранится в памяти движка; формат файла — после v1.
 
 `System` trait не создаётся: заменяемые реализации систем не нужны, trait оправдан только там, где действительно нужна замена (см. §44), прежде всего для `RenderSystem`. Отсечение невидимого, анимационные и прочие системы — после v1.
 
@@ -673,30 +681,25 @@ pub struct Renderer {
 
 `RenderSystem` является интерфейсом между renderer и конкретным GPU backend.
 
-В первой версии рендеринг offscreen: backend рисует в собственный буфер и возвращает `RenderOutput` (статистика + `SceneImage`). Окна и поверхности (`RenderSurface`) в v1 нет.
+В первой версии рендеринг идёт в окно: backend создаёт для окна движка поверхность отображения (`RenderSurface`), рисует в неё и показывает результат вызовом `present` в конце `render`. Offscreen-рендеринга и передачи изображения клиенту в v1 нет (см. §35). Окно принадлежит движку (§4.4), backend получает его при инициализации.
 
 ```rust
 pub trait RenderSystem {
-    fn initialize(&mut self) -> Result<(), RenderError>;
+    fn initialize(&mut self, window: &Window) -> Result<(), RenderError>;
 
-    fn resize(&mut self, size: ImageSize) -> Result<(), RenderError>;
+    fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError>;
 
     fn render(
         &mut self,
         frame: &RenderFrame,
         resources: &ResourceManager,
-    ) -> Result<RenderOutput, RenderError>;
+    ) -> Result<RenderStats, RenderError>;
 
     fn shutdown(&mut self);
 }
 ```
 
-```rust
-pub struct RenderOutput {
-    pub stats: RenderStats,
-    pub image: SceneImage,
-}
-```
+`RenderStats` — статистика последнего кадра (например, число вызовов отрисовки и примитивов; §33, `render/stats.rs`). Отдельного типа результата с изображением нет: кадр показывается в окне.
 
 ---
 
@@ -715,6 +718,8 @@ WgpuBackend   VulkanBackend (после v1)
 
 На первом этапе следует реализовать только один backend — `wgpu`.
 
+`WgpuBackend` создаёт поверхность (`wgpu::Surface`) для окна движка, владеет цепочкой обмена (swapchain) и выполняет `present`; окно и его цикл событий принадлежат движку (`platform`, §4.4).
+
 Архитектура должна позволять добавить другой backend позже, но не нужно проектировать чрезмерно сложный слой заранее.
 
 ---
@@ -729,7 +734,7 @@ UI должен видеть:
 Engine
 Scene API
 загрузка моделей (load_model)
-high-level settings (размер изображения и т.п.)
+high-level settings (размер окна и т.п.)
 ```
 
 UI не должен видеть:
@@ -742,6 +747,8 @@ CommandBuffer
 BindGroup
 Pipeline
 DescriptorSet
+Surface
+SwapChain
 VkDevice
 ```
 
@@ -779,7 +786,7 @@ pub trait SceneApi {
 }
 ```
 
-Внутренние операции `SceneManager` для движка (не клиентский API): `create_object(mesh, parent)` и `build_render_frame(size) -> RenderFrame`. Удаление узлов и объектов — после v1.
+Внутренние операции `SceneManager` для движка (не клиентский API): `create_object(mesh, parent)` и `build_render_frame(size: WindowSize) -> RenderFrame`. Размер кадра берётся из окна и передаётся движком; сцена окном не владеет (§23). Удаление узлов и объектов — после v1.
 
 ---
 
@@ -804,8 +811,7 @@ impl ResourceManager {
 
 ```rust
 let mut engine = Engine::new();
-engine.initialize(ImageSize::new(1280, 720))?;
-engine.set_image_listener(Box::new(AppListener { /* ... */ }));
+engine.initialize(WindowDescriptor::new("FREAK Engine", 1280, 720))?;
 
 let root = engine.scene().root_node();
 let node = engine.scene().create_node(root)?;
@@ -816,8 +822,10 @@ engine.scene().set_node_transform(
     Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
 )?;
 
-// Отрисовкой управляет сам движок; клиент получает изображения
-// через ImageListener и не вызывает update/render.
+// Отрисовкой и показом управляет сам движок: клиент не вызывает
+// update/render и не получает изображение — сцена показывается
+// в окне, созданном движком. run() работает, пока окно не закрыто.
+engine.run()?;
 engine.shutdown()?;
 ```
 
@@ -830,15 +838,17 @@ engine.shutdown()?;
 ```text
 UI -> Engine API
 
-core -> scene, resources, systems, render
+core -> scene, resources, systems, render, platform
 
-scene -> math, resources, render::frame (только DTO кадра)
+scene -> math, resources, render::frame (только DTO кадра), platform (только WindowSize)
 
-render -> math, resources
+render -> math, resources, platform
 
-backend -> render, resources, math
+backend -> platform, render, resources, math
 
 systems -> scene, resources, render, backend
+
+platform -> winit
 ```
 
 Запрещённые зависимости:
@@ -847,11 +857,14 @@ systems -> scene, resources, render, backend
 Scene -> Renderer
 Scene -> RenderSystem
 Scene -> wgpu
+Scene -> Window
+Scene -> winit
 
 Resources -> UI
 
 Renderer -> UI
 Renderer -> SceneManager
+Renderer -> platform
 
 RenderSystem -> SceneManager
 
@@ -894,7 +907,7 @@ let frame = scene.build_render_frame(...);
 let output = renderer.render(
     &frame,
     &resources,
-)?; // RenderOutput { stats, image }
+)?; // RenderStats
 ```
 
 ---
@@ -927,10 +940,10 @@ Item collection
 Build RenderFrame
  |
  v
-Renderer::render() -> RenderSystem draw commands
+Renderer::render() -> RenderSystem: draw + present
  |
  v
-SceneImage -> ImageListener
+Present (Surface) -> окно
  |
  v
 Idle
@@ -966,10 +979,11 @@ freak-engine/   (крейт BFGE)
 └── src/
     ├── lib.rs              # публичная поверхность (ре-экспорты)
     ├── math.rs             # ре-экспорт glam: Vec3, Quat, Mat4
+    ├── platform.rs         # PlatformAdapter, Window, WindowDescriptor, WindowSize
     │
     ├── core/
     │   ├── mod.rs
-    │   ├── api.rs          # EngineApi, ImageListener
+    │   ├── api.rs          # EngineApi
     │   ├── engine.rs       # Engine
     │   ├── engine_loop.rs  # EngineLoop, EngineEvent
     │   └── error.rs        # EngineError
@@ -1002,15 +1016,15 @@ freak-engine/   (крейт BFGE)
     │   ├── mod.rs
     │   ├── frame.rs        # RenderFrame, RenderCamera, RenderItem
     │   ├── renderer.rs     # Renderer
-    │   ├── system.rs       # RenderSystem, RenderOutput, RenderError
-    │   ├── stats.rs        # RenderStats
-    │   └── image.rs        # ImageSize, SceneImage
+    │   ├── system.rs       # RenderSystem, RenderError
+    │   └── stats.rs        # RenderStats
     │
     └── backend/
         ├── mod.rs
         └── wgpu/
             ├── mod.rs
             ├── backend.rs  # WgpuRenderSystem
+            ├── surface.rs  # RenderSurface (swapchain, present)
             ├── pipeline.rs
             ├── buffer.rs
             └── texture.rs
@@ -1051,7 +1065,8 @@ workspace/
 - dependency injection framework;
 - event bus;
 - универсальную backend abstraction на множество API;
-- сложную иерархию trait objects.
+- сложную иерархию trait objects;
+- offscreen-рендеринг и передачу готового изображения клиенту.
 
 Подготовить архитектуру так, чтобы такие возможности можно было добавить позже.
 
@@ -1062,7 +1077,8 @@ workspace/
 Минимальная рабочая версия должна содержать:
 
 ```text
-Engine, EngineLoop, EngineEvent, EngineApi, ImageListener
+Engine, EngineLoop, EngineEvent, EngineApi, PlatformAdapter
+Window, WindowDescriptor, WindowSize
 
 SceneManager, SceneApi
 SceneNode, SceneObject
@@ -1073,7 +1089,7 @@ ResourceManager (разделяемые меши, включая библиот�
 
 RenderFrame, RenderItem, RenderCamera
 
-Renderer, RenderSystem, WgpuRenderSystem (скелет)
+Renderer, RenderSystem, WgpuRenderSystem (окно, поверхность и present — скелет)
 
 systems::lifecycle (сборка/инициализация/завершение частей), load_model (glTF/OBJ — интерфейс), save/restore сцены (в памяти, сериализация — §18.1)
 ```
@@ -1081,14 +1097,14 @@ systems::lifecycle (сборка/инициализация/завершение
 MVP должен позволять:
 
 ```text
-создать и инициализировать Engine
+создать и инициализировать Engine (с окном)
 создать SceneNode
 создать SceneObject из загруженной модели (load_model)
 изменить Transform узла (объект следует за узлом)
 перепривязать объект к другому узлу
 задать точку обзора
 сформировать RenderFrame
-отрисовать кадр и получить SceneImage
+отрисовать кадр и показать его в окне
 сохранить и восстановить сцену (в памяти)
 ```
 
@@ -1127,6 +1143,13 @@ package Resources {
     class MeshHandle
 }
 
+package Platform {
+    class PlatformAdapter
+    class Window
+    class WindowDescriptor
+    class WindowSize
+}
+
 package Rendering {
     class RenderFrame
     class RenderItem
@@ -1134,8 +1157,6 @@ package Rendering {
 
     interface RenderSystem
     class Renderer
-    class ImageSize
-    class SceneImage
 }
 
 Engine --> SceneManager
@@ -1143,7 +1164,10 @@ Engine --> ResourceManager
 Engine --> Renderer
 Engine ..> RenderSystem
 Engine --> EngineLoop
+Engine --> PlatformAdapter
 EngineLoop ..> EngineEvent
+PlatformAdapter *-- Window
+RenderSystem --> Window : present
 
 SceneManager *-- SceneNode
 SceneManager *-- Viewpoint
@@ -1184,8 +1208,9 @@ participant ResourceManager
 participant Renderer
 participant RenderSystem
 participant GPU
+participant Window
 
-UI -> Engine : initialize / shutdown
+UI -> Engine : initialize(window) / run / shutdown
 Engine -> Engine : systems::lifecycle (create / initialize / shutdown)
 
 UI -> Engine : load_model / set_* / save / restore
@@ -1202,11 +1227,11 @@ Engine -> Renderer : render(frame, resources)
 Renderer -> ResourceManager : resolve handles
 Renderer -> RenderSystem : render(frame, resources)
 RenderSystem -> GPU : draw commands
-GPU --> RenderSystem : image
-RenderSystem --> Renderer : RenderOutput { stats, image }
-Renderer --> Engine : RenderOutput
+RenderSystem -> Window : present (Surface)
+GPU --> Window : изображение показано
 
-Engine -> UI : image_ready(&SceneImage)
+RenderSystem --> Renderer : RenderStats
+Renderer --> Engine : RenderStats
 
 @enduml
 ```
@@ -1222,7 +1247,7 @@ Engine -> UI : image_ready(&SceneImage)
 
 [*] --> Created
 
-Created --> Initializing : Engine::new() / initialize(size)
+Created --> Initializing : Engine::new() / initialize(window)
 
 Initializing --> Ready
 Initializing --> Failed
@@ -1236,12 +1261,12 @@ PreparingFrame --> Rendering
 Rendering --> Presenting
 Presenting --> Ready
 
-Ready --> Resizing : set_image_size()
+Ready --> Resizing : set_window_size()
 Resizing --> Ready
 
 Rendering --> Failed : unrecoverable error
 
-Ready --> ShuttingDown
+Ready --> ShuttingDown : shutdown() / окно закрыто
 Failed --> ShuttingDown
 
 ShuttingDown --> Terminated
@@ -1290,6 +1315,7 @@ component "Resources" as Resources
 
 component "Renderer" as Renderer
 component "Graphics Backend" as Backend
+component "Платформа\n(окно, события)" as Platform
 
 UI --> API
 
@@ -1299,6 +1325,7 @@ Core --> Scene
 Core --> Systems
 Core --> Resources
 Core --> Renderer
+Core --> Platform
 
 Systems --> Scene
 Systems --> Resources
@@ -1310,6 +1337,7 @@ Scene ..> Renderer : RenderFrame
 
 Renderer --> Resources
 Renderer --> Backend
+Backend --> Platform : поверхность и present
 
 @enduml
 ```
@@ -1370,7 +1398,7 @@ Systems отвечают за:
 Renderer отвечает за:
 
 ```text
-как подготовленный RenderFrame превращается в изображение (offscreen: RenderOutput со SceneImage)
+как подготовленный RenderFrame превращается в изображение, показанное в окне (`Surface` и `present`)
 ```
 
 ## 42.5. Engine
@@ -1413,6 +1441,8 @@ UI отвечает за:
 16. Встроенный меш — такой же `Mesh`-ресурс, как загруженный; для сцены и рендера разницы нет.
 17. Состояние сцены сериализует только `systems::persistence`; `scene` и `resources` не знают о формате сохранения.
 18. Главный цикл движка один; он задаёт порядок применения запросов, обновления и отрисовки и не выполняет инициализацию и завершение (это `systems::lifecycle`).
+19. В v1 кадр показывается в окне через `Surface` и `present`; offscreen-рендеринга и передачи изображения клиенту нет.
+20. Окно движка и его цикл событий принадлежат движку (`platform`); клиент не видит ни оконную, ни графическую платформу.
 
 ---
 
@@ -1426,6 +1456,7 @@ UI отвечает за:
 - публичные API;
 - trait boundaries;
 - `RenderFrame`;
+- окно и поверхность (`platform`, `RenderSystem`);
 - ошибки;
 - UML-документацию.
 
@@ -1480,9 +1511,11 @@ EngineLoop знает, КОГДА и В КАКОМ ПОРЯДКЕ применя
 
 build_render_frame знает, ЧТО должно попасть в конкретный кадр.
 
+Platform знает, КАК создать окно и доставить его события.
+
 Renderer знает, КАК превратить кадр в GPU-команды.
 
-RenderSystem знает, КАК выполнить эти команды через конкретный backend.
+RenderSystem знает, КАК выполнить эти команды через конкретный backend и показать результат в окне.
 
 Engine знает, КОГДА и В КАКОМ ПОРЯДКЕ вызвать подсистемы.
 
