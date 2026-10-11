@@ -59,7 +59,7 @@ impl Transform {
     /// Local transform matrix.
     #[allow(dead_code)] // used by [SCN] build_render_frame (milestone 2)
     pub(crate) fn matrix(&self) -> Mat4 {
-        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
+        crate::math::model(self.translation, self.rotation, self.scale)
     }
 }
 
