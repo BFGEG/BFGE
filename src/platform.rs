@@ -1,7 +1,18 @@
-//! Window and platform adapter owned by the engine.
+//! Desktop window and platform adapter owned by the engine.
 
-const WINDOW_CREATION_UNAVAILABLE: &str = "window creation is not implemented";
-const WINDOW_RESIZE_UNAVAILABLE: &str = "window resizing is not implemented";
+use std::sync::Arc;
+use std::time::Duration;
+
+use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
+use winit::event::WindowEvent;
+use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::platform::pump_events::EventLoopExtPumpEvents;
+use winit::window::{Window as NativeWindow, WindowId};
+
+const WINDOW_NOT_RESUMED: &str = "the window event loop did not resume during initialization";
+#[cfg(test)]
+const TEST_WINDOW_UNAVAILABLE: &str = "the test window has no native window handle";
 
 /// Window size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,29 +51,81 @@ impl WindowDescriptor {
 
 /// The engine's window.
 ///
-/// Owned by [`PlatformAdapter`]; the backend uses it to create a render
-/// surface. Backed by the windowing library in the next milestone.
+/// Owned by [`PlatformAdapter`]; the backend shares the native window's
+/// lifetime when creating a render surface. Native handles are crate-private.
 #[derive(Debug)]
-pub struct Window;
+pub struct Window {
+    inner: WindowInner,
+}
+
+#[derive(Debug)]
+enum WindowInner {
+    Native(Arc<NativeWindow>),
+    #[cfg(test)]
+    Test(WindowSize),
+}
+
+impl Window {
+    pub(crate) fn native(&self) -> Result<Arc<NativeWindow>, PlatformError> {
+        match &self.inner {
+            WindowInner::Native(window) => Ok(Arc::clone(window)),
+            #[cfg(test)]
+            WindowInner::Test(_) => Err(PlatformError::WindowCreation(
+                TEST_WINDOW_UNAVAILABLE.to_owned(),
+            )),
+        }
+    }
+
+    pub(crate) fn size(&self) -> WindowSize {
+        match &self.inner {
+            WindowInner::Native(window) => {
+                let size = window.inner_size();
+                WindowSize::new(size.width, size.height)
+            }
+            #[cfg(test)]
+            WindowInner::Test(size) => *size,
+        }
+    }
+}
 
 /// Owns the engine's window and delivers its events (close, resize).
 ///
 /// The client does not create or manage the window; it only supplies a
-/// [`WindowDescriptor`]. Event delivery is backed by the windowing library
-/// in the next milestone.
+/// [`WindowDescriptor`]. Creation must run on the application's main thread.
+/// The event loop is retained for the frame driver implemented in issue #15.
 #[derive(Debug)]
 pub struct PlatformAdapter {
     window: Window,
-    #[cfg(test)]
-    test_size: Option<WindowSize>,
+    _event_loop: Option<EventLoop<()>>,
 }
 
 impl PlatformAdapter {
     /// Creates the window and the platform adapter.
-    pub(crate) fn new(_descriptor: WindowDescriptor) -> Result<Self, PlatformError> {
-        Err(PlatformError::WindowCreation(
-            WINDOW_CREATION_UNAVAILABLE.to_owned(),
-        ))
+    pub(crate) fn new(descriptor: WindowDescriptor) -> Result<Self, PlatformError> {
+        validate_window_size(descriptor.size)?;
+        let event_loop =
+            EventLoop::new().map_err(|error| PlatformError::WindowCreation(error.to_string()))?;
+        Self::create_window(descriptor, event_loop)
+    }
+
+    fn create_window(
+        descriptor: WindowDescriptor,
+        mut event_loop: EventLoop<()>,
+    ) -> Result<Self, PlatformError> {
+        let mut bootstrap = WindowBootstrap {
+            descriptor,
+            result: None,
+        };
+        event_loop.pump_app_events(Some(Duration::ZERO), &mut bootstrap);
+        let native = bootstrap
+            .result
+            .ok_or_else(|| PlatformError::WindowCreation(WINDOW_NOT_RESUMED.to_owned()))??;
+        Ok(Self {
+            window: Window {
+                inner: WindowInner::Native(native),
+            },
+            _event_loop: Some(event_loop),
+        })
     }
 
     /// Returns the engine's window.
@@ -71,24 +134,67 @@ impl PlatformAdapter {
     }
 
     /// Resizes the window.
-    pub(crate) fn set_window_size(&mut self, _size: WindowSize) -> Result<(), PlatformError> {
-        #[cfg(test)]
-        if let Some(size) = &mut self.test_size {
-            *size = _size;
-            return Ok(());
+    pub(crate) fn set_window_size(&mut self, size: WindowSize) -> Result<(), PlatformError> {
+        validate_window_size(size)?;
+        match &mut self.window.inner {
+            WindowInner::Native(window) => {
+                let _actual_size =
+                    window.request_inner_size(PhysicalSize::new(size.width, size.height));
+            }
+            #[cfg(test)]
+            WindowInner::Test(current) => *current = size,
         }
-
-        Err(PlatformError::WindowResize(
-            WINDOW_RESIZE_UNAVAILABLE.to_owned(),
-        ))
+        Ok(())
     }
 
     #[cfg(test)]
     pub(crate) fn for_test(size: WindowSize) -> Self {
         Self {
-            window: Window,
-            test_size: Some(size),
+            window: Window {
+                inner: WindowInner::Test(size),
+            },
+            _event_loop: None,
         }
+    }
+}
+
+fn validate_window_size(size: WindowSize) -> Result<(), PlatformError> {
+    if size.width == 0 || size.height == 0 {
+        Err(PlatformError::InvalidWindowSize(size))
+    } else {
+        Ok(())
+    }
+}
+
+struct WindowBootstrap {
+    descriptor: WindowDescriptor,
+    result: Option<Result<Arc<NativeWindow>, PlatformError>>,
+}
+
+impl ApplicationHandler for WindowBootstrap {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        if self.result.is_none() {
+            let attributes = NativeWindow::default_attributes()
+                .with_title(&self.descriptor.title)
+                .with_inner_size(PhysicalSize::new(
+                    self.descriptor.size.width,
+                    self.descriptor.size.height,
+                ));
+            self.result = Some(
+                event_loop
+                    .create_window(attributes)
+                    .map(Arc::new)
+                    .map_err(|error| PlatformError::WindowCreation(error.to_string())),
+            );
+        }
+    }
+
+    fn window_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        _event: WindowEvent,
+    ) {
     }
 }
 
@@ -96,10 +202,90 @@ impl PlatformAdapter {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlatformError {
+    /// An explicit window size must have nonzero width and height.
+    #[error("invalid window size: {0:?}; width and height must be nonzero")]
+    InvalidWindowSize(WindowSize),
     /// Failed to create the window.
     #[error("failed to create the window: {0}")]
     WindowCreation(String),
     /// Failed to resize the window.
     #[error("failed to resize the window: {0}")]
     WindowResize(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TEST_WINDOW_TITLE: &str = "BFGE wgpu smoke test";
+
+    #[test]
+    fn zero_width_is_rejected_before_creating_event_loop() {
+        assert!(matches!(
+            PlatformAdapter::new(WindowDescriptor::new(TEST_WINDOW_TITLE, 0, 600)),
+            Err(PlatformError::InvalidWindowSize(_))
+        ));
+    }
+
+    #[test]
+    fn zero_height_resize_preserves_current_window_size() {
+        let size = WindowSize::new(800, 600);
+        let mut platform = PlatformAdapter::for_test(size);
+
+        assert!(matches!(
+            platform.set_window_size(WindowSize::new(800, 0)),
+            Err(PlatformError::InvalidWindowSize(_))
+        ));
+        assert_eq!(platform.window().size(), size);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    #[ignore = "requires a desktop display and a presentation-capable GPU; opens a window"]
+    fn native_surface_initializes_resizes_presents_and_reinitializes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        #[cfg(target_os = "windows")]
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        #[cfg(target_os = "linux")]
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        use crate::backend::wgpu::backend::WgpuRenderSystem;
+        use crate::math::Mat4;
+        use crate::render::frame::{RenderCamera, RenderFrame};
+        use crate::render::stats::RenderStats;
+        use crate::render::system::RenderSystem;
+        use crate::resources::manager::ResourceManager;
+
+        let event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let mut platform = PlatformAdapter::create_window(
+            WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
+            event_loop,
+        )?;
+        let mut backend = WgpuRenderSystem::new();
+        let resources = ResourceManager::new();
+        let frame = RenderFrame {
+            camera: RenderCamera {
+                view: Mat4::IDENTITY,
+                projection: Mat4::IDENTITY,
+            },
+            items: Vec::new(),
+        };
+
+        backend.initialize(platform.window())?;
+        assert!(backend.initialize(platform.window()).is_err());
+        assert_eq!(backend.render(&frame, &resources)?, RenderStats::default());
+        platform.set_window_size(WindowSize::new(640, 480))?;
+        backend.set_window_size(WindowSize::new(640, 480))?;
+        backend.render(&frame, &resources)?;
+        backend.set_window_size(WindowSize::new(0, 0))?;
+        backend.render(&frame, &resources)?;
+        backend.set_window_size(WindowSize::new(640, 480))?;
+        backend.render(&frame, &resources)?;
+        backend.shutdown();
+        assert!(backend.render(&frame, &resources).is_err());
+        backend.initialize(platform.window())?;
+        backend.render(&frame, &resources)?;
+        backend.shutdown();
+        Ok(())
+    }
 }

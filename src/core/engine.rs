@@ -17,8 +17,8 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 /// renderer, window and the frame lifecycle.
 ///
 /// The current skeleton supports construction, scene access and frame handler
-/// registration. Window creation and the main loop are not implemented yet;
-/// initialization and loop startup report these limitations through errors.
+/// registration, window creation and GPU initialization. The main loop is not
+/// implemented yet; loop startup reports this limitation through an error.
 pub struct Engine {
     parts: EngineParts,
     event_loop: EngineLoop,

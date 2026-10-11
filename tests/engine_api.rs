@@ -51,11 +51,11 @@ fn resize_requires_initialization() {
 }
 
 #[test]
-fn unavailable_platform_leaves_engine_uninitialized() {
+fn invalid_window_size_leaves_engine_uninitialized() {
     let mut engine = Engine::new();
 
     assert!(matches!(
-        engine.initialize(WindowDescriptor::new("Engine API test", 800, 600)),
+        engine.initialize(WindowDescriptor::new("Engine API test", 0, 600)),
         Err(EngineError::Platform(_))
     ));
     assert!(matches!(engine.run(), Err(EngineError::NotInitialized)));

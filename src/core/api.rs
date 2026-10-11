@@ -15,6 +15,9 @@ pub trait EngineApi {
     /// Initializes the engine internals, creates the window and the initial
     /// scene.
     ///
+    /// Call this on the application's main thread. Explicit window dimensions
+    /// must be nonzero; platform and graphics failures are returned as errors.
+    ///
     /// The window is created by the engine; the client does not manage the
     /// windowing or graphics platform. The initial scene contains a root node
     /// and a viewpoint with default values, but no scene objects.
