@@ -59,7 +59,7 @@ impl Transform {
     /// Local transform matrix.
     #[allow(dead_code)] // used by [SCN] build_render_frame (milestone 2)
     pub(crate) fn matrix(&self) -> Mat4 {
-        crate::math::model(self.translation, self.rotation, self.scale)
+        Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }
 }
 
@@ -70,5 +70,21 @@ impl Default for Transform {
             rotation: Quat::IDENTITY,
             scale: Vec3::ONE,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 1e-5;
+
+    #[test]
+    fn matrix_translates_a_point() {
+        let transform = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
+
+        let translated = transform.matrix().transform_point3(Vec3::ZERO);
+
+        assert!(translated.abs_diff_eq(Vec3::new(1.0, 2.0, 3.0), EPSILON));
     }
 }

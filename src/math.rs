@@ -1,19 +1,18 @@
-//! Engine math: `glam` re-exports and model-view-projection helpers.
+//! Engine math: `glam` re-exports and view-projection helpers.
 //!
 //! The module wraps `glam` in pure builder functions used to assemble the
-//! model, view and projection matrices of the render frame. It depends on no
-//! other engine module: it accepts only primitive math types.
+//! view and projection matrices of the render frame and to compose them with
+//! the scene's model transform. It depends on no other engine module: it
+//! accepts only primitive math types.
 
 pub use glam::{Mat4, Quat, Vec3};
 
+/// Near clipping plane distance (world units) used by [`perspective`].
 const NEAR: f32 = 0.1;
+/// Far clipping plane distance (world units) used by [`perspective`].
 const FAR: f32 = 100.0;
+/// World up axis used to build the view matrix in [`view`].
 const UP: Vec3 = Vec3::Y;
-
-/// Builds the model matrix from translation, rotation and scale.
-pub fn model(translation: Vec3, rotation: Quat, scale: Vec3) -> Mat4 {
-    Mat4::from_scale_rotation_translation(scale, rotation, translation)
-}
 
 /// Builds the view matrix (world -> view) for a camera at `position`
 /// looking along `direction`, with `+Y` as the world up axis.
@@ -40,15 +39,6 @@ mod tests {
     use super::*;
 
     const EPSILON: f32 = 1e-5;
-
-    #[test]
-    fn model_translates_a_point() {
-        let matrix = model(Vec3::new(1.0, 2.0, 3.0), Quat::IDENTITY, Vec3::ONE);
-
-        let translated = matrix.transform_point3(Vec3::ZERO);
-
-        assert!(translated.abs_diff_eq(Vec3::new(1.0, 2.0, 3.0), EPSILON));
-    }
 
     #[test]
     fn view_moves_the_camera_position_to_the_origin() {
