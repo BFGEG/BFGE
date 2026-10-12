@@ -1,8 +1,5 @@
 //! Window and platform adapter owned by the engine.
 
-const WINDOW_CREATION_UNAVAILABLE: &str = "window creation is not implemented";
-const WINDOW_RESIZE_UNAVAILABLE: &str = "window resizing is not implemented";
-
 /// Window size in pixels.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowSize {
@@ -60,9 +57,7 @@ pub struct PlatformAdapter {
 impl PlatformAdapter {
     /// Creates the window and the platform adapter.
     pub(crate) fn new(_descriptor: WindowDescriptor) -> Result<Self, PlatformError> {
-        Err(PlatformError::WindowCreation(
-            WINDOW_CREATION_UNAVAILABLE.to_owned(),
-        ))
+        Err(PlatformError::WindowCreationUnavailable)
     }
 
     /// Returns the engine's window.
@@ -78,9 +73,7 @@ impl PlatformAdapter {
             return Ok(());
         }
 
-        Err(PlatformError::WindowResize(
-            WINDOW_RESIZE_UNAVAILABLE.to_owned(),
-        ))
+        Err(PlatformError::WindowResizeUnavailable)
     }
 
     #[cfg(test)]
@@ -96,10 +89,10 @@ impl PlatformAdapter {
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum PlatformError {
-    /// Failed to create the window.
-    #[error("failed to create the window: {0}")]
-    WindowCreation(String),
-    /// Failed to resize the window.
-    #[error("failed to resize the window: {0}")]
-    WindowResize(String),
+    /// Window creation is not implemented yet.
+    #[error("failed to create the window: window creation is not implemented")]
+    WindowCreationUnavailable,
+    /// Window resizing is not implemented yet.
+    #[error("failed to resize the window: window resizing is not implemented")]
+    WindowResizeUnavailable,
 }
