@@ -158,7 +158,7 @@ impl PlatformAdapter {
     }
 }
 
-fn validate_window_size(size: WindowSize) -> Result<(), PlatformError> {
+pub(crate) fn validate_window_size(size: WindowSize) -> Result<(), PlatformError> {
     if size.width == 0 || size.height == 0 {
         Err(PlatformError::InvalidWindowSize(size))
     } else {
@@ -274,8 +274,14 @@ mod tests {
         backend.initialize(platform.window())?;
         assert!(backend.initialize(platform.window()).is_err());
         assert_eq!(backend.render(&frame, &resources)?, RenderStats::default());
-        platform.set_window_size(WindowSize::new(640, 480))?;
         backend.set_window_size(WindowSize::new(640, 480))?;
+        platform.set_window_size(WindowSize::new(640, 480))?;
+        backend.render(&frame, &resources)?;
+        assert!(
+            backend
+                .set_window_size(WindowSize::new(u32::MAX, 480))
+                .is_err()
+        );
         backend.render(&frame, &resources)?;
         backend.set_window_size(WindowSize::new(0, 0))?;
         backend.render(&frame, &resources)?;

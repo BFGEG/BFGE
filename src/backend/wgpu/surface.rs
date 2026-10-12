@@ -87,13 +87,23 @@ impl RenderSurface {
 
     pub(crate) fn resize(&mut self, size: WindowSize) -> Result<(), RenderError> {
         validate_surface_size(size, self.device.limits().max_texture_dimension_2d)?;
-        self.size = size;
-        self.configured = false;
         if is_drawable(size) {
+            let previous_dimensions = (self.config.width, self.config.height);
             self.config.width = size.width;
             self.config.height = size.height;
-            self.configure()
+            match self.configure() {
+                Ok(()) => {
+                    self.size = size;
+                    Ok(())
+                }
+                Err(error) => {
+                    (self.config.width, self.config.height) = previous_dimensions;
+                    Err(error)
+                }
+            }
         } else {
+            self.size = size;
+            self.configured = false;
             Ok(())
         }
     }
@@ -161,16 +171,18 @@ impl RenderSurface {
                 }
                 wgpu::CurrentSurfaceTexture::Outdated => self.configure()?,
                 wgpu::CurrentSurfaceTexture::Lost => {
-                    self.surface = self
+                    self.configured = false;
+                    let surface = self
                         .instance
                         .create_surface(Arc::clone(&self.window))
                         .map_err(|error| {
                             RenderError::Render(format!("recreate surface: {error}"))
                         })?;
-                    self.config = self
-                        .surface
+                    let config = surface
                         .get_default_config(&self.adapter, self.size.width, self.size.height)
                         .ok_or_else(|| RenderError::Render(NO_CONFIGURATION.to_owned()))?;
+                    self.surface = surface;
+                    self.config = config;
                     self.configure()?;
                 }
                 wgpu::CurrentSurfaceTexture::Validation => {

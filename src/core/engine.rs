@@ -6,7 +6,7 @@ use std::time::Duration;
 use crate::core::api::EngineApi;
 use crate::core::engine_loop::{EngineEvent, EngineLoop};
 use crate::core::error::EngineError;
-use crate::platform::{PlatformAdapter, WindowDescriptor, WindowSize};
+use crate::platform::{PlatformAdapter, WindowDescriptor, WindowSize, validate_window_size};
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::systems::lifecycle::{self, EngineParts};
@@ -110,8 +110,9 @@ impl EngineApi for Engine {
 
     fn set_window_size(&mut self, size: WindowSize) -> Result<(), EngineError> {
         let platform = self.platform.as_mut().ok_or(EngineError::NotInitialized)?;
-        platform.set_window_size(size)?;
+        validate_window_size(size)?;
         self.parts.renderer.set_window_size(size)?;
+        platform.set_window_size(size)?;
         Ok(())
     }
 
@@ -273,10 +274,39 @@ mod tests {
             .expect("the test backend accepts initialization");
         state.borrow_mut().fail_resize = true;
 
-        assert!(matches!(engine.set_window_size(TEST_SIZE),
+        assert!(matches!(engine.set_window_size(WindowSize::new(1280, 720)),
             Err(EngineError::Render(RenderError::Render(message))) if message == BACKEND_FAILURE
         ));
-        assert!(engine.platform.is_some());
+        assert_eq!(
+            engine
+                .platform
+                .as_ref()
+                .map(|platform| platform.window().size()),
+            Some(TEST_SIZE)
+        );
+    }
+
+    #[test]
+    fn invalid_resize_does_not_change_backend_or_window() {
+        let (mut engine, state) = engine_with_backend();
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("the test backend accepts initialization");
+
+        assert!(matches!(
+            engine.set_window_size(WindowSize::new(0, 600)),
+            Err(EngineError::Platform(
+                crate::platform::PlatformError::InvalidWindowSize(_)
+            ))
+        ));
+        assert_eq!(state.borrow().size, None);
+        assert_eq!(
+            engine
+                .platform
+                .as_ref()
+                .map(|platform| platform.window().size()),
+            Some(TEST_SIZE)
+        );
     }
 
     #[test]
