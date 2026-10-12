@@ -10,6 +10,49 @@ use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 /// (#D3D3D3) on an sRGB swapchain.
 const CUBE_COLOR: [f32; 4] = [0.65, 0.65, 0.65, 1.0];
 
+/// Corner positions of the six cube faces, in face order +X, -X, +Y, -Y, +Z,
+/// -Z. Each row lists the face's four corners in counter-clockwise order as
+/// seen from outside the cube, so the triangle split per face
+/// (`[b, b+1, b+2]`, `[b, b+2, b+3]` with `b = face * 4`) winds outward.
+const CUBE_FACES: [[Vec3; 4]; 6] = [
+    [
+        Vec3::new(0.5, -0.5, 0.5),
+        Vec3::new(0.5, -0.5, -0.5),
+        Vec3::new(0.5, 0.5, -0.5),
+        Vec3::new(0.5, 0.5, 0.5),
+    ],
+    [
+        Vec3::new(-0.5, -0.5, -0.5),
+        Vec3::new(-0.5, -0.5, 0.5),
+        Vec3::new(-0.5, 0.5, 0.5),
+        Vec3::new(-0.5, 0.5, -0.5),
+    ],
+    [
+        Vec3::new(-0.5, 0.5, 0.5),
+        Vec3::new(0.5, 0.5, 0.5),
+        Vec3::new(0.5, 0.5, -0.5),
+        Vec3::new(-0.5, 0.5, -0.5),
+    ],
+    [
+        Vec3::new(-0.5, -0.5, -0.5),
+        Vec3::new(0.5, -0.5, -0.5),
+        Vec3::new(0.5, -0.5, 0.5),
+        Vec3::new(-0.5, -0.5, 0.5),
+    ],
+    [
+        Vec3::new(-0.5, -0.5, 0.5),
+        Vec3::new(0.5, -0.5, 0.5),
+        Vec3::new(0.5, 0.5, 0.5),
+        Vec3::new(-0.5, 0.5, 0.5),
+    ],
+    [
+        Vec3::new(0.5, -0.5, -0.5),
+        Vec3::new(-0.5, -0.5, -0.5),
+        Vec3::new(-0.5, 0.5, -0.5),
+        Vec3::new(0.5, 0.5, -0.5),
+    ],
+];
+
 /// Identifier of a built-in (procedural) mesh.
 #[allow(dead_code)] // no non-test constructor until [SYS] wiring lands; tests construct it
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -49,48 +92,9 @@ impl MeshLibrary {
 
     /// Builds a unit cube centered at the origin with outward-facing winding.
     fn cube() -> Mesh {
-        let faces = [
-            [
-                Vec3::new(0.5, -0.5, 0.5),
-                Vec3::new(0.5, -0.5, -0.5),
-                Vec3::new(0.5, 0.5, -0.5),
-                Vec3::new(0.5, 0.5, 0.5),
-            ],
-            [
-                Vec3::new(-0.5, -0.5, -0.5),
-                Vec3::new(-0.5, -0.5, 0.5),
-                Vec3::new(-0.5, 0.5, 0.5),
-                Vec3::new(-0.5, 0.5, -0.5),
-            ],
-            [
-                Vec3::new(-0.5, 0.5, 0.5),
-                Vec3::new(0.5, 0.5, 0.5),
-                Vec3::new(0.5, 0.5, -0.5),
-                Vec3::new(-0.5, 0.5, -0.5),
-            ],
-            [
-                Vec3::new(-0.5, -0.5, -0.5),
-                Vec3::new(0.5, -0.5, -0.5),
-                Vec3::new(0.5, -0.5, 0.5),
-                Vec3::new(-0.5, -0.5, 0.5),
-            ],
-            [
-                Vec3::new(-0.5, -0.5, 0.5),
-                Vec3::new(0.5, -0.5, 0.5),
-                Vec3::new(0.5, 0.5, 0.5),
-                Vec3::new(-0.5, 0.5, 0.5),
-            ],
-            [
-                Vec3::new(0.5, -0.5, -0.5),
-                Vec3::new(-0.5, -0.5, -0.5),
-                Vec3::new(-0.5, 0.5, -0.5),
-                Vec3::new(0.5, 0.5, -0.5),
-            ],
-        ];
-
-        let mut vertices = Vec::with_capacity(faces.len() * 4);
-        let mut indices = Vec::with_capacity(faces.len() * 6);
-        for (face, corners) in faces.iter().enumerate() {
+        let mut vertices = Vec::with_capacity(CUBE_FACES.len() * 4);
+        let mut indices = Vec::with_capacity(CUBE_FACES.len() * 6);
+        for (face, corners) in CUBE_FACES.iter().enumerate() {
             let base = (face * 4) as u32;
             for corner in corners {
                 vertices.push(Vertex { position: *corner });
