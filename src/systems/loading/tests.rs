@@ -397,3 +397,282 @@ fn composite_gltf_creates_one_object_attached_to_requested_node() {
     assert_eq!(scene.nodes()[1].objects, [object]);
     assert_eq!(resources.meshes()[0].submeshes.len(), 2);
 }
+
+#[test]
+fn obj_loads_triangle_without_material_library() {
+    let directory = directory();
+    let path = write_obj(directory.path(), OBJ_TRIANGLE);
+
+    let mesh = read_mesh(&path).expect("positions and a triangle form a valid OBJ model");
+
+    assert_eq!(mesh.submeshes.len(), 1);
+    assert_eq!(mesh.submeshes[0].indices, [0, 1, 2]);
+    assert_eq!(mesh.submeshes[0].vertices[1].position, Vec3::X);
+    assert_eq!(mesh.color, DEFAULT_MODEL_COLOR);
+}
+
+#[test]
+fn obj_triangulates_quad_with_negative_indices() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 0\nf -4 -3 -2 -1\n",
+    );
+
+    let mesh =
+        read_mesh(&path).expect("negative OBJ indices are relative to the current vertex list");
+
+    assert_eq!(mesh.submeshes[0].indices, [0, 1, 2, 0, 2, 3]);
+    assert_eq!(mesh.submeshes[0].vertices.len(), 4);
+}
+
+#[test]
+fn obj_reads_separate_position_uv_and_normal_indices() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nvn 0 0 1\nf 1/3/1 2/2/1 3/1/1\n",
+    );
+
+    let mesh = read_mesh(&path).expect("UV and normal indices do not replace position indices");
+
+    assert_eq!(mesh.submeshes[0].vertices[1].position, Vec3::X);
+    assert_eq!(mesh.submeshes[0].vertices[2].position, Vec3::Y);
+}
+
+#[test]
+fn obj_preserves_object_parts_as_one_mesh() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nv 3 0 0\nv 4 0 0\nv 3 1 0\no first\nf 1 2 3\ng second\nf 4 5 6\n",
+    );
+
+    let mesh = read_mesh(&path).expect("objects and groups partition one model into submeshes");
+
+    assert_eq!(mesh.submeshes.len(), 2);
+    assert_eq!(
+        mesh.submeshes[1].vertices[0].position,
+        Vec3::new(3.0, 0.0, 0.0)
+    );
+}
+
+#[test]
+fn obj_selects_first_diffuse_color_used_by_geometry() {
+    let directory = directory();
+    std::fs::write(directory.path().join(MTL_FILE), "newmtl unused\nKd 0 0 1\nnewmtl empty\nnewmtl green\nKd 0.2 0.4 0.6\nd 0.8\nnewmtl red\nKd 1 0 0\n").expect("the fixture directory is writable");
+    let path = write_obj(
+        directory.path(),
+        "mtllib colors.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl empty\nf 1 2 3\nusemtl green\nf 1 2 3\nusemtl red\nf 1 2 3\n",
+    );
+
+    let mesh = read_mesh(&path).expect("valid MTL colors follow the common selection rule");
+
+    assert_eq!(mesh.submeshes.len(), 3);
+    assert_eq!(mesh.color, [0.2, 0.4, 0.6, 0.8]);
+}
+
+#[test]
+fn obj_material_without_diffuse_color_uses_neutral_color() {
+    let directory = directory();
+    std::fs::write(
+        directory.path().join(MTL_FILE),
+        "newmtl empty\nKa 0.1 0.2 0.3\n",
+    )
+    .expect("the fixture directory is writable");
+    let path = write_obj(
+        directory.path(),
+        "mtllib colors.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl empty\nf 1 2 3\n",
+    );
+
+    assert_eq!(
+        read_mesh(&path)
+            .expect("ambient color does not define the diffuse color")
+            .color,
+        DEFAULT_MODEL_COLOR
+    );
+}
+
+#[test]
+fn obj_missing_material_library_reports_its_path_and_io_cause() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "mtllib colors.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+    );
+    let expected = directory.path().join(MTL_FILE);
+
+    assert!(
+        matches!(read_mesh(&path), Err(ModelLoadError::Io { path, source })
+        if path == expected && source.kind() == std::io::ErrorKind::NotFound)
+    );
+}
+
+#[test]
+fn obj_corrupt_material_library_reports_the_material_file() {
+    let directory = directory();
+    std::fs::write(
+        directory.path().join(MTL_FILE),
+        "newmtl broken\nKd red green blue\n",
+    )
+    .expect("the fixture directory is writable");
+    let path = write_obj(
+        directory.path(),
+        "mtllib colors.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+    );
+    let expected = directory.path().join(MTL_FILE);
+
+    assert!(
+        matches!(read_mesh(&path), Err(ModelLoadError::Parse { path, .. }) if path == expected)
+    );
+}
+
+#[test]
+fn obj_does_not_hide_material_library_errors_after_a_successful_library() {
+    let directory = directory();
+    std::fs::write(directory.path().join(MTL_FILE), "newmtl green\nKd 0 1 0\n")
+        .expect("the fixture directory is writable");
+    let path = write_obj(
+        directory.path(),
+        "mtllib colors.mtl\nmtllib missing.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl green\nf 1 2 3\n",
+    );
+
+    assert!(matches!(read_mesh(&path), Err(ModelLoadError::Io { .. })));
+}
+
+#[test]
+fn obj_rejects_out_of_range_indices_without_partial_scene_changes() {
+    let directory = directory();
+    let path = write_obj(directory.path(), "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 99\n");
+    let mut resources = ResourceManager::new();
+    let mut scene = SceneManager::new();
+    let root = scene.root_node();
+
+    assert!(matches!(
+        load_model(&path, &mut resources, &mut scene, root),
+        Err(ModelLoadError::Parse { .. })
+    ));
+
+    assert!(resources.meshes().is_empty());
+    assert!(scene.objects().is_empty());
+}
+
+#[test]
+fn obj_rejects_invalid_vertex_numbers() {
+    let directory = directory();
+    let path = write_obj(directory.path(), "v nope 0 0\nf 1 2 3\n");
+
+    assert!(matches!(
+        read_mesh(&path),
+        Err(ModelLoadError::Parse { .. })
+    ));
+}
+
+#[test]
+fn obj_rejects_nonfinite_positions() {
+    let directory = directory();
+    let path = write_obj(directory.path(), "v NaN 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n");
+
+    assert!(matches!(
+        read_mesh(&path),
+        Err(ModelLoadError::Parse { .. })
+    ));
+}
+
+#[test]
+fn obj_rejects_models_without_faces() {
+    let directory = directory();
+    let path = write_obj(directory.path(), "v 0 0 0\n");
+
+    assert!(matches!(
+        read_mesh(&path),
+        Err(ModelLoadError::Parse { .. })
+    ));
+}
+
+#[test]
+fn obj_rejects_concave_polygon() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 2 0 0\nv 1 0.5 0\nv 2 2 0\nv 0 2 0\nf 1 2 3 4 5\n",
+    );
+
+    assert!(
+        matches!(read_mesh(&path), Err(ModelLoadError::Parse { message, .. }) if message.contains("convex"))
+    );
+}
+
+#[test]
+fn obj_rejects_nonplanar_quad() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 1 1 0\nv 0 1 1\nf 1 2 3 4\n",
+    );
+
+    assert!(
+        matches!(read_mesh(&path), Err(ModelLoadError::Parse { message, .. }) if message.contains("planar"))
+    );
+}
+
+#[test]
+fn obj_rejects_line_geometry() {
+    let directory = directory();
+    let path = write_obj(directory.path(), "v 0 0 0\nv 1 0 0\nl 1 2\n");
+
+    assert!(matches!(
+        read_mesh(&path),
+        Err(ModelLoadError::Parse { .. })
+    ));
+}
+
+#[test]
+fn obj_triangulates_convex_polygon_with_more_than_four_vertices() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 2 0 0\nv 3 1 0\nv 1.5 2 0\nv 0 1 0\nf 1 2 3 4 5\n",
+    );
+
+    let mesh = read_mesh(&path).expect("a convex planar pentagon supports fan triangulation");
+
+    assert_eq!(mesh.submeshes[0].indices, [0, 1, 2, 0, 2, 3, 0, 3, 4]);
+}
+
+#[test]
+fn composite_obj_creates_one_scene_object() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\no first\nf 1 2 3\no second\nf 1 2 3\n",
+    );
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let root = scene.root_node();
+
+    let object = load_model(&path, &mut resources, &mut scene, root)
+        .expect("both parts belong to the same model");
+
+    assert_eq!(scene.nodes()[0].objects, [object]);
+    assert_eq!(scene.objects().len(), 1);
+    assert_eq!(resources.meshes().len(), 1);
+    assert_eq!(resources.meshes()[0].submeshes.len(), 2);
+}
+
+#[test]
+fn obj_invalid_later_part_does_not_register_the_valid_first_part() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\no first\nf 1 2 3\no broken\nf 1 2 99\n",
+    );
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let root = scene.root_node();
+
+    assert!(load_model(&path, &mut resources, &mut scene, root).is_err());
+
+    assert!(scene.objects().is_empty());
+    assert!(resources.meshes().is_empty());
+}

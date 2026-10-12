@@ -80,3 +80,48 @@ fn public_api_reports_corrupt_data_and_can_retry() {
     write_gltf(directory.path(), &gltf_document(), &triangle_buffer());
     assert!(engine.load_model(&path, root).is_ok());
 }
+
+#[test]
+fn public_api_loads_obj_and_repeated_loads_create_distinct_objects() {
+    let directory = directory();
+    let path = write_obj(directory.path(), OBJ_TRIANGLE);
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+
+    let first = engine
+        .load_model(&path, root)
+        .expect("valid OBJ loads through the facade");
+    let second = engine
+        .load_model(&path, root)
+        .expect("reloading creates another scene object");
+
+    assert_ne!(first, second);
+}
+
+#[test]
+fn public_api_reports_invalid_obj_data() {
+    let directory = directory();
+    let path = write_obj(directory.path(), "v invalid 0 0\nf 1 2 3\n");
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+
+    assert!(
+        matches!(engine.load_model(&path, root), Err(ModelLoadError::Parse { path: failed, .. }) if failed == path)
+    );
+}
+
+#[test]
+fn public_api_reports_missing_mtl_file() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "mtllib colors.mtl\nv 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+    );
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+    let expected = directory.path().join(MTL_FILE);
+
+    assert!(
+        matches!(engine.load_model(&path, root), Err(ModelLoadError::Io { path, .. }) if path == expected)
+    );
+}
