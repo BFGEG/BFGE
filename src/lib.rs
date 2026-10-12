@@ -21,6 +21,8 @@ pub use crate::core::engine::Engine;
 pub use crate::core::engine_loop::{EngineEvent, EventTime};
 pub use crate::core::error::EngineError;
 pub use crate::platform::{WindowDescriptor, WindowSize};
+pub use crate::render::stats::RenderStats;
+pub use crate::render::system::RenderError;
 pub use crate::scene::api::SceneApi;
 pub use crate::scene::error::SceneError;
 pub use crate::scene::ids::{SceneNodeId, SceneObjectId};

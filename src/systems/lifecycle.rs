@@ -1,5 +1,6 @@
 //! Assembly, initialization and shutdown of engine parts.
 
+use crate::backend::wgpu::backend::WgpuRenderSystem;
 use crate::platform::Window;
 use crate::render::renderer::Renderer;
 use crate::render::system::RenderError;
@@ -22,9 +23,12 @@ pub struct EngineParts {
 
 /// Assembles the engine parts (without initializing the graphics).
 pub fn create() -> EngineParts {
-    // SceneManager::new(), ResourceManager::new(),
-    // Renderer::new(Box::new(WgpuRenderSystem::new())), SceneStore::new()
-    todo!("milestone 2")
+    EngineParts {
+        scene: SceneManager::new(),
+        resources: ResourceManager::new(),
+        renderer: Renderer::new(Box::new(WgpuRenderSystem::new())),
+        store: SceneStore::new(),
+    }
 }
 
 /// Initializes the graphics system and creates a render surface for the
@@ -33,8 +37,9 @@ pub fn create() -> EngineParts {
 /// # Errors
 ///
 /// Returns [`LifecycleError`] on initialization failure.
-pub fn initialize(_parts: &mut EngineParts, _window: &Window) -> Result<(), LifecycleError> {
-    todo!("milestone 2")
+pub fn initialize(parts: &mut EngineParts, window: &Window) -> Result<(), LifecycleError> {
+    parts.renderer.initialize(window)?;
+    Ok(())
 }
 
 /// Shuts the engine parts down.
@@ -42,8 +47,9 @@ pub fn initialize(_parts: &mut EngineParts, _window: &Window) -> Result<(), Life
 /// # Errors
 ///
 /// Returns [`LifecycleError`] on shutdown failure.
-pub fn shutdown(_parts: &mut EngineParts) -> Result<(), LifecycleError> {
-    todo!("milestone 2")
+pub fn shutdown(parts: &mut EngineParts) -> Result<(), LifecycleError> {
+    parts.renderer.shutdown();
+    Ok(())
 }
 
 /// Error of the engine parts lifecycle.
