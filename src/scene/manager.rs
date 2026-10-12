@@ -33,13 +33,25 @@ impl SceneManager {
     }
 
     /// Engine-internal operation: creates a scene object.
+    ///
+    /// Object IDs are monotonic and never reused; this holds because v1 does
+    /// not delete nodes or objects (§6.2). The caller must ensure `mesh` refers
+    /// to a registered mesh: `SceneManager` cannot validate handles (§29).
     #[allow(dead_code)] // called by [SYS]
     pub(crate) fn create_object(
         &mut self,
-        _mesh: MeshHandle,
-        _parent: SceneNodeId,
+        mesh: MeshHandle,
+        parent: SceneNodeId,
     ) -> Result<SceneObjectId, SceneError> {
-        todo!("milestone 2")
+        if parent.0 as usize >= self.nodes.len() {
+            return Err(SceneError::UnknownNode(parent));
+        }
+
+        let id = SceneObjectId(self.objects.len() as u32);
+        self.objects.push(SceneObject::new(mesh));
+        self.nodes[parent.0 as usize].objects.push(id);
+
+        Ok(id)
     }
 
     /// Builds a frame from the current scene state.
@@ -135,6 +147,8 @@ impl SceneApi for SceneManager {
 mod tests {
     use super::*;
     use crate::math::Vec3;
+    use crate::resources::library::BuiltinMesh;
+    use crate::resources::manager::ResourceManager;
     use crate::scene::api::SceneApi;
 
     const EPSILON: f32 = 1e-5;
@@ -169,5 +183,31 @@ mod tests {
         let frame = scene.build_render_frame(WindowSize::new(800, 0));
 
         assert!(frame.camera.projection.is_finite());
+    }
+
+    #[test]
+    fn create_object_attaches_to_the_root() {
+        let mut resources = ResourceManager::new();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let mut scene = SceneManager::new();
+        let root = scene.root_node();
+
+        let id = scene
+            .create_object(mesh, root)
+            .expect("the root node exists");
+
+        assert_eq!(scene.objects().len(), 1);
+        assert_eq!(scene.nodes()[0].objects, vec![id]);
+    }
+
+    #[test]
+    fn create_object_with_unknown_parent_fails() {
+        let mut resources = ResourceManager::new();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let mut scene = SceneManager::new();
+
+        let result = scene.create_object(mesh, SceneNodeId(99));
+
+        assert!(matches!(result, Err(SceneError::UnknownNode(_))));
     }
 }

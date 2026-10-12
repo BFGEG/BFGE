@@ -10,7 +10,6 @@ pub struct SceneNode {
     pub(crate) parent: Option<SceneNodeId>,
     #[allow(dead_code)] // read by [SCN] manager (milestone 2)
     pub(crate) children: Vec<SceneNodeId>,
-    #[allow(dead_code)] // read by [SCN] manager (milestone 2)
     pub(crate) objects: Vec<SceneObjectId>,
     #[allow(dead_code)] // read by [SCN] build_render_frame (milestone 2)
     pub(crate) local_transform: Transform,
