@@ -13,9 +13,7 @@ use crate::scene::error::SceneError;
 #[derive(Default)]
 pub struct EngineLoop {
     callbacks: Vec<EngineEvent>,
-    #[allow(dead_code)] // consumed by [CORE]-1 (milestone 2)
     pending: VecDeque<InternalEvent>,
-    #[allow(dead_code)] // consumed by [CORE]-1 (milestone 2)
     running: bool,
 }
 
@@ -25,16 +23,35 @@ impl EngineLoop {
         self.callbacks.push(event);
     }
 
-    #[cfg(test)]
+    /// Returns all registered frame handlers in registration order.
     pub(super) fn callbacks(&mut self) -> &mut [EngineEvent] {
         &mut self.callbacks
+    }
+
+    /// Sets the running state of the engine loop.
+    pub(super) fn set_running(&mut self, status: bool) {
+        self.running = status;
+    }
+
+    /// Returns whether the engine loop should keep running.
+    pub(super) fn is_running(&self) -> bool {
+        self.running
+    }
+
+    /// Queues an internal loop event.
+    pub(super) fn push_internal(&mut self, event: InternalEvent) {
+        self.pending.push_back(event);
+    }
+
+    /// Pops the next internal loop event, if any.
+    pub(super) fn next_internal(&mut self) -> Option<InternalEvent> {
+        self.pending.pop_front()
     }
 }
 
 /// Internal loop event, crate-private: not part of the public API.
 ///
 /// The engine installs its own handler for each event.
-#[allow(dead_code)] // produced by [CORE]-1 and [platform] (milestone 2)
 #[derive(Debug)]
 pub(crate) enum InternalEvent {
     /// Next frame step.
