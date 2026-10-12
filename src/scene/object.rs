@@ -10,7 +10,6 @@ pub struct SceneObject {
 }
 
 impl SceneObject {
-    #[allow(dead_code)] // called by [SYS]/[SCN] (milestone 2)
     pub(crate) fn new(mesh: MeshHandle) -> Self {
         Self { mesh }
     }
