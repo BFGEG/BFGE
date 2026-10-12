@@ -6,6 +6,8 @@ mod support;
 
 use support::*;
 
+const UPPERCASE_GLTF_FILE: &str = "model.GLTF";
+
 #[test]
 fn public_api_loads_gltf_and_glb_without_a_graphics_window() {
     let directory = directory();
@@ -124,4 +126,16 @@ fn public_api_reports_missing_mtl_file() {
     assert!(
         matches!(engine.load_model(&path, root), Err(ModelLoadError::Io { path, .. }) if path == expected)
     );
+}
+
+#[test]
+fn public_api_recognizes_model_extensions_without_case_sensitivity() {
+    let directory = directory();
+    let original = write_gltf(directory.path(), &gltf_document(), &triangle_buffer());
+    let path = directory.path().join(UPPERCASE_GLTF_FILE);
+    std::fs::rename(original, &path).expect("the fixture directory supports renaming files");
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+
+    assert!(engine.load_model(&path, root).is_ok());
 }

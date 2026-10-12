@@ -1,16 +1,38 @@
 use serde_json::json;
 
+use super::*;
+
 use crate::math::Vec3;
 use crate::scene::api::SceneApi;
 use crate::scene::node::SceneNode;
 use crate::scene::viewpoint::ViewpointState;
 
-use super::*;
-
 #[path = "../../../tests/support/mod.rs"]
 mod support;
 
 use support::*;
+
+const ACCESSORS_KEY: &str = "accessors";
+const BUFFER_VIEWS_KEY: &str = "bufferViews";
+const BYTE_LENGTH_KEY: &str = "byteLength";
+const BYTE_OFFSET_KEY: &str = "byteOffset";
+const BYTE_STRIDE_KEY: &str = "byteStride";
+const CHILDREN_KEY: &str = "children";
+const COUNT_KEY: &str = "count";
+const IMAGES_KEY: &str = "images";
+const MATERIAL_KEY: &str = "material";
+const MATERIALS_KEY: &str = "materials";
+const MESHES_KEY: &str = "meshes";
+const MODE_KEY: &str = "mode";
+const NODES_KEY: &str = "nodes";
+const PRIMITIVES_KEY: &str = "primitives";
+const SCALE_KEY: &str = "scale";
+const SCENE_KEY: &str = "scene";
+const SCENES_KEY: &str = "scenes";
+const SPARSE_KEY: &str = "sparse";
+const TEXTURES_KEY: &str = "textures";
+const INDICES_KEY: &str = "indices";
+const COMPONENT_TYPE_KEY: &str = "componentType";
 
 #[test]
 fn gltf_reads_positions_and_indices_from_external_buffer() {
@@ -51,10 +73,10 @@ fn glb_reads_binary_chunk() {
 fn gltf_generates_indices_for_nonindexed_geometry() {
     let directory = directory();
     let mut document = gltf_document();
-    document["meshes"][0]["primitives"][0]
+    document[MESHES_KEY][0][PRIMITIVES_KEY][0]
         .as_object_mut()
         .expect("primitive is an object")
-        .remove("indices");
+        .remove(INDICES_KEY);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     let mesh = read_mesh(&path).expect("a triangle can omit its index accessor");
@@ -66,7 +88,7 @@ fn gltf_generates_indices_for_nonindexed_geometry() {
 fn gltf_composes_parent_and_child_transforms_for_mesh_instances() {
     let directory = directory();
     let mut document = gltf_document();
-    document["nodes"] = json!([
+    document[NODES_KEY] = json!([
         {"translation": [10, 0, 0], "rotation": [0, 0, 1, 0], "children": [1, 2]},
         {"mesh": 0, "translation": [2, 0, 0], "scale": [2, 3, 1]},
         {"mesh": 0, "translation": [0, 5, 0]}
@@ -94,7 +116,7 @@ fn gltf_composes_parent_and_child_transforms_for_mesh_instances() {
 fn gltf_reverses_triangle_winding_for_mirrored_nodes() {
     let directory = directory();
     let mut document = gltf_document();
-    document["nodes"][0]["scale"] = json!([-1, 1, 1]);
+    document[NODES_KEY][0][SCALE_KEY] = json!([-1, 1, 1]);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     let mesh = read_mesh(&path).expect("a negative scale preserves visible triangle faces");
@@ -106,16 +128,17 @@ fn gltf_reverses_triangle_winding_for_mirrored_nodes() {
 fn gltf_selects_first_explicit_color_on_used_geometry() {
     let directory = directory();
     let mut document = gltf_document();
-    document["materials"] = json!([
+    document[MATERIALS_KEY] = json!([
         {"pbrMetallicRoughness": {"baseColorFactor": [0, 0, 1, 1]}},
         {},
         {"pbrMetallicRoughness": {"baseColorFactor": [0.2, 0.4, 0.6, 0.8]}},
         {"pbrMetallicRoughness": {"baseColorFactor": [1, 0, 0, 1]}}
     ]);
-    let primitive = document["meshes"][0]["primitives"][0].clone();
-    document["meshes"][0]["primitives"] = json!([primitive.clone(), primitive.clone(), primitive]);
+    let primitive = document[MESHES_KEY][0][PRIMITIVES_KEY][0].clone();
+    document[MESHES_KEY][0][PRIMITIVES_KEY] =
+        json!([primitive.clone(), primitive.clone(), primitive]);
     for (index, material) in [1, 2, 3].into_iter().enumerate() {
-        document["meshes"][0]["primitives"][index]["material"] = json!(material);
+        document[MESHES_KEY][0][PRIMITIVES_KEY][index][MATERIAL_KEY] = json!(material);
     }
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
@@ -128,8 +151,8 @@ fn gltf_selects_first_explicit_color_on_used_geometry() {
 fn gltf_material_without_explicit_color_uses_neutral_color() {
     let directory = directory();
     let mut document = gltf_document();
-    document["materials"] = json!([{}]);
-    document["meshes"][0]["primitives"][0]["material"] = json!(0);
+    document[MATERIALS_KEY] = json!([{}]);
+    document[MESHES_KEY][0][PRIMITIVES_KEY][0][MATERIAL_KEY] = json!(0);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     assert_eq!(
@@ -179,7 +202,7 @@ fn gltf_rejects_truncated_buffer() {
 fn gltf_rejects_accessor_outside_buffer_view() {
     let directory = directory();
     let mut document = gltf_document();
-    document["accessors"][0]["count"] = json!(4);
+    document[ACCESSORS_KEY][0][COUNT_KEY] = json!(4);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     assert!(matches!(
@@ -192,7 +215,7 @@ fn gltf_rejects_accessor_outside_buffer_view() {
 fn gltf_rejects_non_triangle_geometry() {
     let directory = directory();
     let mut document = gltf_document();
-    document["meshes"][0]["primitives"][0]["mode"] = json!(1);
+    document[MESHES_KEY][0][PRIMITIVES_KEY][0][MODE_KEY] = json!(1);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     assert!(matches!(
@@ -205,7 +228,7 @@ fn gltf_rejects_non_triangle_geometry() {
 fn gltf_rejects_cyclic_node_hierarchy() {
     let directory = directory();
     let mut document = gltf_document();
-    document["nodes"][0]["children"] = json!([0]);
+    document[NODES_KEY][0][CHILDREN_KEY] = json!([0]);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     assert!(matches!(
@@ -218,10 +241,10 @@ fn gltf_rejects_cyclic_node_hierarchy() {
 fn gltf_ignores_missing_texture_images() {
     let directory = directory();
     let mut document = gltf_document();
-    document["images"] = json!([{"uri": "missing.png"}]);
-    document["textures"] = json!([{"source": 0}]);
-    document["materials"] = json!([{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}]);
-    document["meshes"][0]["primitives"][0]["material"] = json!(0);
+    document[IMAGES_KEY] = json!([{"uri": "missing.png"}]);
+    document[TEXTURES_KEY] = json!([{"source": 0}]);
+    document[MATERIALS_KEY] = json!([{"pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}}]);
+    document[MESHES_KEY][0][PRIMITIVES_KEY][0][MATERIAL_KEY] = json!(0);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     assert!(read_mesh(&path).is_ok());
@@ -231,15 +254,15 @@ fn gltf_ignores_missing_texture_images() {
 fn gltf_ignores_buffers_used_only_by_images() {
     let directory = directory();
     let mut document = gltf_document();
-    document["buffers"]
+    document[BUFFERS_KEY]
         .as_array_mut()
         .expect("buffers is an array")
         .push(json!({"byteLength": 8, "uri": "missing-image.bin"}));
-    document["bufferViews"]
+    document[BUFFER_VIEWS_KEY]
         .as_array_mut()
         .expect("bufferViews is an array")
         .push(json!({"buffer": 1, "byteLength": 8}));
-    document["images"] = json!([{"bufferView": 2, "mimeType": "image/png"}]);
+    document[IMAGES_KEY] = json!([{"bufferView": 2, "mimeType": "image/png"}]);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     assert!(read_mesh(&path).is_ok());
@@ -262,7 +285,7 @@ fn gltf_rejects_nonfinite_positions() {
 fn gltf_rejects_malformed_embedded_base64() {
     let directory = directory();
     let mut document = gltf_document();
-    document["buffers"][0]["uri"] = json!("data:application/octet-stream;base64,!");
+    document[BUFFERS_KEY][0][URI_KEY] = json!("data:application/octet-stream;base64,!");
     let path = write_gltf(directory.path(), &document, &[]);
 
     assert!(matches!(
@@ -275,7 +298,7 @@ fn gltf_rejects_malformed_embedded_base64() {
 fn gltf_rejects_sparse_accessor_with_clear_reason() {
     let directory = directory();
     let mut document = gltf_document();
-    document["accessors"][0]["sparse"] = json!({
+    document[ACCESSORS_KEY][0][SPARSE_KEY] = json!({
         "count": 1,
         "indices": {"bufferView": 1, "componentType": 5123},
         "values": {"bufferView": 0}
@@ -301,10 +324,10 @@ fn gltf_reads_interleaved_position_accessor() {
         );
     }
     buffer.extend([0_u16, 1, 2].into_iter().flat_map(u16::to_le_bytes));
-    document["buffers"][0]["byteLength"] = json!(54);
-    document["bufferViews"][0]["byteLength"] = json!(48);
-    document["bufferViews"][0]["byteStride"] = json!(16);
-    document["bufferViews"][1]["byteOffset"] = json!(48);
+    document[BUFFERS_KEY][0][BYTE_LENGTH_KEY] = json!(54);
+    document[BUFFER_VIEWS_KEY][0][BYTE_LENGTH_KEY] = json!(48);
+    document[BUFFER_VIEWS_KEY][0][BYTE_STRIDE_KEY] = json!(16);
+    document[BUFFER_VIEWS_KEY][1][BYTE_OFFSET_KEY] = json!(48);
     let path = write_gltf(directory.path(), &document, &buffer);
 
     let mesh = read_mesh(&path).expect("POSITION can be interleaved with unused attributes");
@@ -317,9 +340,9 @@ fn gltf_reads_interleaved_position_accessor() {
 fn gltf_uses_selected_scene_without_loading_other_scenes() {
     let directory = directory();
     let mut document = gltf_document();
-    document["nodes"] = json!([{"mesh": 0}, {"mesh": 0, "translation": [7, 0, 0]}]);
-    document["scenes"] = json!([{"nodes": [0]}, {"nodes": [1]}]);
-    document["scene"] = json!(1);
+    document[NODES_KEY] = json!([{"mesh": 0}, {"mesh": 0, "translation": [7, 0, 0]}]);
+    document[SCENES_KEY] = json!([{"nodes": [0]}, {"nodes": [1]}]);
+    document[SCENE_KEY] = json!(1);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
 
     let mesh = read_mesh(&path).expect("the default scene selects only its own instances");
@@ -376,7 +399,7 @@ fn unknown_parent_is_rejected_before_file_io_or_resource_registration() {
 fn composite_gltf_creates_one_object_attached_to_requested_node() {
     let directory = directory();
     let mut document = gltf_document();
-    document["nodes"] =
+    document[NODES_KEY] =
         json!([{"mesh": 0, "children": [1]}, {"mesh": 0, "translation": [2, 0, 0]}]);
     let path = write_gltf(directory.path(), &document, &triangle_buffer());
     let mut scene = SceneManager::new();
@@ -675,4 +698,39 @@ fn obj_invalid_later_part_does_not_register_the_valid_first_part() {
 
     assert!(scene.objects().is_empty());
     assert!(resources.meshes().is_empty());
+}
+
+#[test]
+fn gltf_reads_all_supported_unsigned_index_types() {
+    for (component_type, indices) in [
+        (5121, vec![0_u8, 1, 2]),
+        (
+            5123,
+            [0_u16, 1, 2]
+                .into_iter()
+                .flat_map(u16::to_le_bytes)
+                .collect(),
+        ),
+        (
+            5125,
+            [0_u32, 1, 2]
+                .into_iter()
+                .flat_map(u32::to_le_bytes)
+                .collect(),
+        ),
+    ] {
+        let directory = directory();
+        let mut document = gltf_document();
+        let mut buffer = triangle_buffer()[..36].to_vec();
+        buffer.extend_from_slice(&indices);
+        document[BUFFERS_KEY][0][BYTE_LENGTH_KEY] = json!(buffer.len());
+        document[BUFFER_VIEWS_KEY][1][BYTE_LENGTH_KEY] = json!(indices.len());
+        document[ACCESSORS_KEY][1][COMPONENT_TYPE_KEY] = json!(component_type);
+        let path = write_gltf(directory.path(), &document, &buffer);
+
+        let mesh =
+            read_mesh(&path).expect("the accessor declares the matching unsigned component type");
+
+        assert_eq!(mesh.submeshes[0].indices, [0, 1, 2]);
+    }
 }

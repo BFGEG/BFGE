@@ -4,6 +4,8 @@ use base64::Engine as _;
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
+pub const BUFFERS_KEY: &str = "buffers";
+pub const URI_KEY: &str = "uri";
 pub const GLTF_FILE: &str = "model.gltf";
 pub const GLB_FILE: &str = "model.glb";
 pub const BUFFER_FILE: &str = "geometry data.bin";
@@ -63,17 +65,17 @@ pub fn write_gltf(directory: &Path, document: &Value, buffer: &[u8]) -> PathBuf 
 }
 
 pub fn embed_buffer(document: &mut Value, buffer: &[u8]) {
-    document["buffers"][0]["uri"] = json!(format!(
+    document[BUFFERS_KEY][0][URI_KEY] = json!(format!(
         "data:application/octet-stream;base64,{}",
         base64::engine::general_purpose::STANDARD.encode(buffer)
     ));
 }
 
 pub fn write_glb(directory: &Path, mut document: Value, buffer: &[u8]) -> PathBuf {
-    document["buffers"][0]
+    document[BUFFERS_KEY][0]
         .as_object_mut()
         .expect("buffer is a JSON object")
-        .remove("uri");
+        .remove(URI_KEY);
     let mut json = serde_json::to_vec(&document).expect("fixture JSON is serializable");
     while !json.len().is_multiple_of(4) {
         json.push(b' ');

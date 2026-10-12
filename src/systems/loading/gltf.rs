@@ -7,10 +7,10 @@ use gltf::mesh::Mode;
 use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 
+use super::{DEFAULT_MODEL_COLOR, ModelLoadError, parse_error, read_file};
+
 use crate::math::{Mat4, Vec3};
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
-
-use super::{DEFAULT_MODEL_COLOR, ModelLoadError, parse_error, read_file};
 
 const DATA_URI_PREFIX: &str = "data:";
 const BASE64_SUFFIX: &str = ";base64";

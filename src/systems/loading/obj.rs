@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::path::Path;
 
+use super::{DEFAULT_MODEL_COLOR, ModelLoadError, parse_error, read_file};
+
 use crate::math::Vec3;
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
-
-use super::{DEFAULT_MODEL_COLOR, ModelLoadError, parse_error, read_file};
 
 const POLYGON_TOLERANCE: f32 = 1e-5;
 
