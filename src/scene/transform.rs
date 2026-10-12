@@ -72,3 +72,19 @@ impl Default for Transform {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const EPSILON: f32 = 1e-5;
+
+    #[test]
+    fn matrix_translates_a_point() {
+        let transform = Transform::from_translation(Vec3::new(1.0, 2.0, 3.0));
+
+        let translated = transform.matrix().transform_point3(Vec3::ZERO);
+
+        assert!(translated.abs_diff_eq(Vec3::new(1.0, 2.0, 3.0), EPSILON));
+    }
+}

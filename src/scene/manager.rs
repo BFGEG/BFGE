@@ -1,7 +1,8 @@
 //! Scene storage and management.
 
+use crate::math;
 use crate::platform::WindowSize;
-use crate::render::frame::RenderFrame;
+use crate::render::frame::{RenderCamera, RenderFrame};
 use crate::resources::handle::MeshHandle;
 use crate::scene::api::SceneApi;
 use crate::scene::error::SceneError;
@@ -41,11 +42,26 @@ impl SceneManager {
         todo!("milestone 2")
     }
 
-    /// Builds a frame: tree traversal, world transforms, camera from the
-    /// viewpoint and the image size.
-    #[allow(dead_code)] // called by [CORE]
-    pub(crate) fn build_render_frame(&self, _size: WindowSize) -> RenderFrame {
-        todo!("milestone 2")
+    /// Builds a frame from the current scene state.
+    ///
+    /// The camera comes from the viewpoint and the window size. Object
+    /// collection and world transforms are added in the next milestone, so
+    /// `items` is currently empty.
+    #[allow(dead_code)] // called by [CORE] (milestone 2)
+    pub(crate) fn build_render_frame(&self, size: WindowSize) -> RenderFrame {
+        let aspect_ratio = if size.height == 0 {
+            1.0
+        } else {
+            size.width as f32 / size.height as f32
+        };
+
+        RenderFrame {
+            camera: RenderCamera {
+                view: math::view(self.viewpoint.position, self.viewpoint.direction),
+                projection: math::perspective(self.viewpoint.fov_y, aspect_ratio),
+            },
+            items: Vec::new(),
+        }
     }
 
     /// Returns all scene nodes.
@@ -112,5 +128,46 @@ impl SceneApi for SceneManager {
     fn set_viewpoint(&mut self, state: ViewpointState) -> Result<(), SceneError> {
         self.viewpoint = state;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::math::Vec3;
+    use crate::scene::api::SceneApi;
+
+    const EPSILON: f32 = 1e-5;
+    const WINDOW: WindowSize = WindowSize {
+        width: 800,
+        height: 600,
+    };
+
+    #[test]
+    fn frame_camera_is_placed_at_the_viewpoint() {
+        let mut scene = SceneManager::new();
+        let position = Vec3::new(1.0, 2.0, 3.0);
+        let viewpoint = ViewpointState {
+            position,
+            direction: Vec3::new(0.0, 0.0, -1.0),
+            fov_y: 60.0_f32.to_radians(),
+        };
+        scene
+            .set_viewpoint(viewpoint)
+            .expect("the scene accepts a valid viewpoint");
+
+        let frame = scene.build_render_frame(WINDOW);
+
+        let origin = frame.camera.view.transform_point3(position);
+        assert!(origin.abs_diff_eq(Vec3::ZERO, EPSILON));
+    }
+
+    #[test]
+    fn zero_height_window_produces_finite_projection() {
+        let scene = SceneManager::new();
+
+        let frame = scene.build_render_frame(WindowSize::new(800, 0));
+
+        assert!(frame.camera.projection.is_finite());
     }
 }
