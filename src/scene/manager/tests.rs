@@ -1,5 +1,7 @@
 //! Unit tests for [`SceneManager`], including its engine-internal operations.
 
+#![cfg(test)]
+
 use super::*;
 use crate::math::Vec3;
 use crate::resources::library::{BuiltinMesh, MeshLibrary};

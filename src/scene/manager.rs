@@ -195,5 +195,4 @@ impl SceneApi for SceneManager {
 }
 
 #[cfg(test)]
-#[path = "manager_tests.rs"]
 mod tests;
