@@ -72,6 +72,7 @@ impl EngineApi for Engine {
         if self.platform.is_none() {
             Err(EngineError::NotInitialized)
         } else {
+            // TODO(issue #15): implement the main loop and frame event delivery.
             Err(EngineError::RunUnavailable)
         }
     }
