@@ -99,20 +99,72 @@ impl Default for Engine {
 impl EngineApi for Engine {
     fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError> {
         if self.platform.is_some() {
-            Err(EngineError::AlreadyInitialized)
-        } else {
-            let platform = PlatformAdapter::new(window)?;
-            self.initialize_platform(platform)
+            return Err(EngineError::AlreadyInitialized);
         }
+        let platform = PlatformAdapter::new(window)?;
+        self.initialize_platform(platform)
     }
 
     fn run(&mut self) -> Result<(), EngineError> {
         if self.platform.is_none() {
-            Err(EngineError::NotInitialized)
-        } else {
-            // TODO(issue #15): implement the main loop and frame event delivery.
-            Err(EngineError::RunUnavailable)
+            return Err(EngineError::NotInitialized);
         }
+
+        self.event_loop.set_running(true);
+        self.event_loop.push_internal(InternalEvent::Tick);
+
+        let mut last_frame = Instant::now();
+
+        while self.event_loop.is_running() {
+            let events = if let Some(platform) = self.platform.as_mut() {
+                platform.pump_events()
+            } else {
+                Vec::new()
+            };
+            for event in events {
+                match event {
+                    PlatformEvent::Resized(size) => {
+                        self.event_loop
+                            .push_internal(InternalEvent::WindowResized(size));
+                    }
+                    PlatformEvent::CloseRequested => {
+                        self.event_loop.push_internal(InternalEvent::WindowClosed);
+                    }
+                }
+            }
+
+            while self.event_loop.is_running() {
+                let Some(event) = self.event_loop.next_internal() else {
+                    break;
+                };
+                match event {
+                    InternalEvent::Tick => {
+                        let now = Instant::now();
+                        let delta = now.duration_since(last_frame).as_secs_f32();
+                        last_frame = now;
+                        let event_time = EventTime {
+                            time_since_last_event: delta,
+                            time_since_last_frame: delta,
+                        };
+                        self.frame_pass(&event_time)?;
+                    }
+                    InternalEvent::WindowResized(size) => {
+                        self.parts.renderer.set_window_size(size)?;
+                    }
+                    InternalEvent::WindowClosed => {
+                        self.event_loop.set_running(false);
+                        break;
+                    }
+                }
+            }
+
+            if self.event_loop.is_running() {
+                self.event_loop.push_internal(InternalEvent::Tick);
+            }
+        }
+
+        self.event_loop.set_running(false);
+        Ok(())
     }
 
     fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError> {
@@ -122,12 +174,11 @@ impl EngineApi for Engine {
 
     fn shutdown(&mut self) -> Result<(), EngineError> {
         if self.platform.is_none() {
-            Err(EngineError::NotInitialized)
-        } else {
-            lifecycle::shutdown(&mut self.parts)?;
-            self.platform = None;
-            Ok(())
+            return Err(EngineError::NotInitialized);
         }
+        lifecycle::shutdown(&mut self.parts)?;
+        self.platform = None;
+        Ok(())
     }
 
     fn scene(&mut self) -> &mut dyn SceneApi {
@@ -218,11 +269,10 @@ mod tests {
         fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
             let mut state = self.0.borrow_mut();
             if state.fail_resize {
-                Err(RenderError::Render(BACKEND_FAILURE.to_owned()))
-            } else {
-                state.size = Some(size);
-                Ok(())
+                return Err(RenderError::Render(BACKEND_FAILURE.to_owned()));
             }
+            state.size = Some(size);
+            Ok(())
         }
 
         fn render(
