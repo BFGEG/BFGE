@@ -1,12 +1,14 @@
 //! Engine facade and orchestrator.
 
 use std::path::Path;
-use std::time::Duration;
+use std::time::Instant;
 
 use crate::core::api::EngineApi;
-use crate::core::engine_loop::{EngineEvent, EngineLoop};
+use crate::core::engine_loop::{EngineEvent, EngineLoop, EventTime, InternalEvent};
 use crate::core::error::EngineError;
-use crate::platform::{PlatformAdapter, WindowDescriptor, WindowSize, validate_window_size};
+use crate::platform::{
+    PlatformAdapter, PlatformEvent, WindowDescriptor, WindowSize, validate_window_size,
+};
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::systems::lifecycle::{self, EngineParts};
@@ -17,8 +19,8 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 /// renderer, window and the frame lifecycle.
 ///
 /// The current skeleton supports construction, scene access and frame handler
-/// registration, window creation and GPU initialization. The main loop is not
-/// implemented yet; loop startup reports this limitation through an error.
+/// registration, window creation and GPU initialization. The main loop drives
+/// frame handlers, frame build, render and present until the window is closed.
 pub struct Engine {
     parts: EngineParts,
     event_loop: EngineLoop,
@@ -41,15 +43,51 @@ impl Engine {
         Ok(())
     }
 
-    #[allow(dead_code)] // driven by EngineLoop (milestone 2)
-    fn update(&mut self, _dt: Duration) -> Result<(), EngineError> {
-        todo!("milestone 2")
+    /// One frame step: builds the frame from the current window size and
+    /// presents it through the renderer.
+    fn render(&mut self) -> Result<(), EngineError> {
+        let platform = self.platform.as_ref().ok_or(EngineError::NotInitialized)?;
+        let window_size = platform.window().size();
+        let frame = self.parts.scene.build_render_frame(window_size);
+        self.parts.renderer.render(&frame, &self.parts.resources)?;
+        Ok(())
     }
 
-    #[allow(dead_code)] // driven by EngineLoop (milestone 2)
-    fn render(&mut self) -> Result<(), EngineError> {
-        todo!("milestone 2")
+    /// Runs one pass: user frame handlers around the render step.
+    fn frame_pass(&mut self, event_time: &EventTime) -> Result<(), EngineError> {
+        process_frame_started_events(&mut self.parts, &mut self.event_loop, event_time)?;
+        self.render()?;
+        process_frame_ended_events(&mut self.parts, &mut self.event_loop, event_time)?;
+        Ok(())
     }
+}
+
+fn process_frame_started_events(
+    parts: &mut EngineParts,
+    event_loop: &mut EngineLoop,
+    event_time: &EventTime,
+) -> Result<(), EngineError> {
+    for event in event_loop.callbacks() {
+        let result = (event.frame_started)(&mut parts.scene, event_time);
+        if result.is_err() {
+            return Err(EngineError::EventError);
+        }
+    }
+    Ok(())
+}
+
+fn process_frame_ended_events(
+    parts: &mut EngineParts,
+    event_loop: &mut EngineLoop,
+    event_time: &EventTime,
+) -> Result<(), EngineError> {
+    for event in event_loop.callbacks() {
+        let result = (event.frame_ended)(&mut parts.scene, event_time);
+        if result.is_err() {
+            return Err(EngineError::EventError);
+        }
+    }
+    Ok(())
 }
 
 impl Default for Engine {
