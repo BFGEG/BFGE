@@ -44,11 +44,17 @@ pub fn initialize(parts: &mut EngineParts, window: &Window) -> Result<(), Lifecy
 
 /// Shuts the engine parts down.
 ///
+/// The renderer is shut down first, then the scene and the resources are reset
+/// to their initial state. The scene store is preserved so a previous save can
+/// be restored after reinitialization.
+///
 /// # Errors
 ///
 /// Returns [`LifecycleError`] on shutdown failure.
 pub fn shutdown(parts: &mut EngineParts) -> Result<(), LifecycleError> {
     parts.renderer.shutdown();
+    parts.scene = SceneManager::new();
+    parts.resources = ResourceManager::new();
     Ok(())
 }
 
