@@ -115,9 +115,13 @@
 
 ```rust
 pub struct Engine {
-    parts: EngineParts,          // scene, resources, renderer, store (§18)
-    event_loop: EngineLoop,      // главный цикл движка (§4.6)
+    // scene, resources, renderer, store (§18)
+    parts: EngineParts,
+    // главный цикл движка (§4.6)
+    event_loop: EngineLoop,
+    // окно текущей сессии; `None` до initialize и после shutdown (§39)
     platform: Option<PlatformAdapter>,
+    // цикл событий окна; создаётся при первом initialize, живёт весь срок Engine (§4.4)
     winit_loop: Option<EventLoop<()>>,
 }
 ```

@@ -16,7 +16,7 @@ use crate::scene::viewpoint::ViewpointState;
 /// The store lives for the whole engine lifetime and survives `shutdown`;
 /// it is shared between sessions because the engine lives longer than a
 /// single session. The saved scene is lost only when the engine is dropped.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct SceneStore {
     saved: Option<SavedScene>,
 }
@@ -29,7 +29,7 @@ impl SceneStore {
 }
 
 /// The full scene state captured by a save.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct SavedScene {
     nodes: Vec<SavedNode>,
     objects: Vec<SavedObject>,
@@ -38,7 +38,7 @@ struct SavedScene {
 }
 
 /// A saved scene node: parent, children, attached objects and a local transform.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct SavedNode {
     parent: Option<SceneNodeId>,
     children: Vec<SceneNodeId>,
@@ -67,7 +67,7 @@ impl SavedNode {
 }
 
 /// A saved scene object: the handle of the mesh it instances.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct SavedObject {
     mesh: MeshHandle,
 }
