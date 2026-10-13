@@ -20,7 +20,7 @@ const ACQUISITION_ATTEMPTS: usize = 2;
 ///
 /// Zero-sized surfaces are suspended until resized to nonzero dimensions.
 /// This initialization milestone clears and presents the surface; geometry
-/// drawing is implemented separately in issue #13.
+/// drawing is implemented separately in issue #28.
 #[derive(Debug)]
 pub struct RenderSurface {
     surface: wgpu::Surface<'static>,
@@ -35,6 +35,14 @@ pub struct RenderSurface {
 }
 
 impl RenderSurface {
+    pub(super) fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    pub(super) fn format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
     pub(crate) fn new(window: &Window) -> Result<Self, RenderError> {
         let size = window.size();
         let native = window
@@ -209,7 +217,7 @@ fn validate_surface_size(size: WindowSize, limit: u32) -> Result<(), RenderError
     }
 }
 
-fn checked_gpu_operation<T>(
+pub(super) fn checked_gpu_operation<T>(
     device: &wgpu::Device,
     operation: impl FnOnce() -> T,
 ) -> Result<T, RenderError> {

@@ -6,19 +6,27 @@ use crate::render::stats::RenderStats;
 use crate::render::system::{RenderError, RenderSystem};
 use crate::resources::manager::ResourceManager;
 
+use super::pipeline::MeshPipeline;
 use super::surface::RenderSurface;
 
 const ALREADY_INITIALIZED: &str = "wgpu backend is already initialized";
 const NOT_INITIALIZED: &str = "wgpu backend is not initialized";
-const DRAWING_UNAVAILABLE: &str = "mesh drawing is not implemented (issue #13)";
+const DRAWING_UNAVAILABLE: &str = "mesh drawing is not implemented (issue #28)";
 
 /// Graphics system based on wgpu.
 ///
-/// Initializes the GPU and presents cleared frames. Mesh drawing is deferred
-/// to issue #13; nonempty frames return an error instead of dropping geometry.
+/// Initializes the GPU and mesh pipeline, then presents cleared frames.
+/// Nonempty frames return an error until geometry drawing is implemented.
 #[derive(Debug, Default)]
 pub struct WgpuRenderSystem {
-    surface: Option<RenderSurface>,
+    state: Option<WgpuState>,
+}
+
+#[derive(Debug)]
+struct WgpuState {
+    surface: RenderSurface,
+    #[expect(dead_code, reason = "Geometry drawing follows in issue #28")]
+    pipeline: MeshPipeline,
 }
 
 impl WgpuRenderSystem {
@@ -30,18 +38,21 @@ impl WgpuRenderSystem {
 
 impl RenderSystem for WgpuRenderSystem {
     fn initialize(&mut self, window: &Window) -> Result<(), RenderError> {
-        if self.surface.is_some() {
+        if self.state.is_some() {
             Err(RenderError::Initialization(ALREADY_INITIALIZED.to_owned()))
         } else {
-            self.surface = Some(RenderSurface::new(window)?);
+            let surface = RenderSurface::new(window)?;
+            let pipeline = MeshPipeline::new(surface.device(), surface.format())?;
+            self.state = Some(WgpuState { surface, pipeline });
             Ok(())
         }
     }
 
     fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
-        self.surface
+        self.state
             .as_mut()
             .ok_or_else(|| RenderError::Render(NOT_INITIALIZED.to_owned()))?
+            .surface
             .resize(size)
     }
 
@@ -50,12 +61,12 @@ impl RenderSystem for WgpuRenderSystem {
         frame: &RenderFrame,
         _resources: &ResourceManager,
     ) -> Result<RenderStats, RenderError> {
-        let surface = self
-            .surface
+        let state = self
+            .state
             .as_mut()
             .ok_or_else(|| RenderError::Render(NOT_INITIALIZED.to_owned()))?;
         if frame.items.is_empty() {
-            surface.clear_and_present()?;
+            state.surface.clear_and_present()?;
             Ok(RenderStats::default())
         } else {
             Err(RenderError::Render(DRAWING_UNAVAILABLE.to_owned()))
@@ -63,7 +74,7 @@ impl RenderSystem for WgpuRenderSystem {
     }
 
     fn shutdown(&mut self) {
-        self.surface = None;
+        self.state = None;
     }
 }
 

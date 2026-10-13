@@ -11,12 +11,24 @@ use crate::resources::manager::ResourceManager;
 use crate::resources::mesh::Mesh;
 
 const VERTEX_COLOR: [f32; 3] = [1.0, 1.0, 1.0];
+const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct GpuVertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
+}
+
+impl GpuVertex {
+    pub(crate) fn layout() -> wgpu::VertexBufferLayout<'static> {
+        wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Self>() as wgpu::BufferAddress,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &VERTEX_ATTRIBUTES,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -148,7 +160,15 @@ mod tests {
 
     #[test]
     fn gpu_vertex_matches_shader_layout() {
-        assert_eq!(std::mem::size_of::<GpuVertex>(), 24);
+        let layout = GpuVertex::layout();
+
+        assert_eq!(layout.array_stride, 24);
+        assert_eq!(layout.attributes[0].shader_location, 0);
+        assert_eq!(layout.attributes[0].offset, 0);
+        assert_eq!(layout.attributes[0].format, wgpu::VertexFormat::Float32x3);
+        assert_eq!(layout.attributes[1].shader_location, 1);
+        assert_eq!(layout.attributes[1].offset, 12);
+        assert_eq!(layout.attributes[1].format, wgpu::VertexFormat::Float32x3);
     }
 
     #[test]
