@@ -406,7 +406,15 @@ fn composite_gltf_creates_one_object_attached_to_requested_node() {
     let mut resources = ResourceManager::new();
     let root = scene.root_node();
     scene.restore(
-        vec![SceneNode::new(None), SceneNode::new(Some(root))],
+        vec![
+            SceneNode {
+                ..Default::default()
+            },
+            SceneNode {
+                parent: Some(root),
+                ..Default::default()
+            },
+        ],
         vec![],
         ViewpointState::default(),
     );
