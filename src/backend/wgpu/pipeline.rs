@@ -1,12 +1,10 @@
 //! Graphics pipeline for the wgpu backend.
 
-#![expect(dead_code, reason = "Geometry drawing follows in issue #28")]
-
 use crate::render::frame::{RenderCamera, RenderItem};
 use crate::render::system::RenderError;
 
-use super::buffer::GpuVertex;
-use super::surface::checked_gpu_operation;
+use super::buffer::{GpuMesh, GpuVertex, upload_buffer};
+use super::checked_gpu_operation;
 use super::texture::DEPTH_FORMAT;
 
 const SHADER_LABEL: &str = "BFGE mesh shader";
@@ -14,6 +12,10 @@ const CAMERA_LAYOUT_LABEL: &str = "BFGE camera uniforms";
 const MESH_LAYOUT_LABEL: &str = "BFGE mesh uniforms";
 const PIPELINE_LAYOUT_LABEL: &str = "BFGE mesh pipeline layout";
 const PIPELINE_LABEL: &str = "BFGE mesh pipeline";
+const CAMERA_BUFFER_LABEL: &str = "BFGE camera buffer";
+const MESH_BUFFER_LABEL: &str = "BFGE object buffer";
+const CAMERA_GROUP_LABEL: &str = "BFGE camera group";
+const MESH_GROUP_LABEL: &str = "BFGE object group";
 const VERTEX_ENTRY: &str = "vs_main";
 const FRAGMENT_ENTRY: &str = "fs_main";
 
@@ -52,6 +54,24 @@ pub(crate) struct MeshPipeline {
     pub render_pipeline: wgpu::RenderPipeline,
     pub camera_layout: wgpu::BindGroupLayout,
     pub mesh_layout: wgpu::BindGroupLayout,
+}
+
+#[derive(Debug)]
+pub(crate) struct UniformBinding {
+    _buffer: wgpu::Buffer,
+    group: wgpu::BindGroup,
+}
+
+impl UniformBinding {
+    pub(crate) fn group(&self) -> &wgpu::BindGroup {
+        &self.group
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct MeshDraw<'a> {
+    pub mesh: &'a GpuMesh,
+    pub uniform: UniformBinding,
 }
 
 impl MeshPipeline {
@@ -118,6 +138,61 @@ impl MeshPipeline {
         })
         .map_err(|error| RenderError::Initialization(format!("create mesh pipeline: {error}")))
     }
+
+    pub(crate) fn bind_camera(
+        &self,
+        device: &wgpu::Device,
+        camera: &RenderCamera,
+    ) -> Result<UniformBinding, RenderError> {
+        let uniform = CameraUniform::from_camera(camera);
+        create_uniform_binding(
+            device,
+            &self.camera_layout,
+            bytemuck::bytes_of(&uniform),
+            CAMERA_BUFFER_LABEL,
+            CAMERA_GROUP_LABEL,
+        )
+    }
+
+    pub(crate) fn bind_mesh(
+        &self,
+        device: &wgpu::Device,
+        item: &RenderItem,
+        color: [f32; 4],
+    ) -> Result<UniformBinding, RenderError> {
+        let uniform = MeshUniform::from_item(item, color);
+        create_uniform_binding(
+            device,
+            &self.mesh_layout,
+            bytemuck::bytes_of(&uniform),
+            MESH_BUFFER_LABEL,
+            MESH_GROUP_LABEL,
+        )
+    }
+}
+
+fn create_uniform_binding(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    contents: &[u8],
+    buffer_label: &'static str,
+    group_label: &'static str,
+) -> Result<UniformBinding, RenderError> {
+    let buffer = upload_buffer(device, buffer_label, contents, wgpu::BufferUsages::UNIFORM)?;
+    let group = checked_gpu_operation(device, || {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(group_label),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        })
+    })?;
+    Ok(UniformBinding {
+        _buffer: buffer,
+        group,
+    })
 }
 
 fn uniform_binding<T>(visibility: wgpu::ShaderStages) -> wgpu::BindGroupLayoutEntry {

@@ -250,10 +250,11 @@ mod tests {
         use winit::platform::x11::EventLoopBuilderExtX11;
 
         use crate::backend::wgpu::backend::WgpuRenderSystem;
-        use crate::math::Mat4;
-        use crate::render::frame::{RenderCamera, RenderFrame};
+        use crate::math::{Mat4, Vec3};
+        use crate::render::frame::{RenderCamera, RenderFrame, RenderItem};
         use crate::render::stats::RenderStats;
         use crate::render::system::RenderSystem;
+        use crate::resources::library::BuiltinMesh;
         use crate::resources::manager::ResourceManager;
 
         let event_loop = EventLoop::builder().with_any_thread(true).build()?;
@@ -262,7 +263,7 @@ mod tests {
             event_loop,
         )?;
         let mut backend = WgpuRenderSystem::new();
-        let resources = ResourceManager::new();
+        let mut resources = ResourceManager::new();
         let frame = RenderFrame {
             camera: RenderCamera {
                 view: Mat4::IDENTITY,
@@ -274,9 +275,28 @@ mod tests {
         backend.initialize(platform.window())?;
         assert!(backend.initialize(platform.window()).is_err());
         assert_eq!(backend.render(&frame, &resources)?, RenderStats::default());
+        let cube = resources.builtin(BuiltinMesh::Cube);
+        let scene_frame = RenderFrame {
+            camera: RenderCamera {
+                view: crate::math::view(Vec3::new(0.0, 0.0, 5.0), Vec3::NEG_Z),
+                projection: crate::math::perspective(60.0_f32.to_radians(), 320.0 / 240.0),
+            },
+            items: [-0.8, 0.8]
+                .into_iter()
+                .map(|x| RenderItem {
+                    world_transform: Mat4::from_translation(Vec3::new(x, 0.0, 0.0)),
+                    mesh: cube,
+                })
+                .collect(),
+        };
+        let scene_stats = RenderStats {
+            draw_calls: 2,
+            triangles: 24,
+        };
+        assert_eq!(backend.render(&scene_frame, &resources)?, scene_stats);
         backend.set_window_size(WindowSize::new(640, 480))?;
         platform.set_window_size(WindowSize::new(640, 480))?;
-        backend.render(&frame, &resources)?;
+        assert_eq!(backend.render(&scene_frame, &resources)?, scene_stats);
         assert!(
             backend
                 .set_window_size(WindowSize::new(u32::MAX, 480))
@@ -284,13 +304,16 @@ mod tests {
         );
         backend.render(&frame, &resources)?;
         backend.set_window_size(WindowSize::new(0, 0))?;
-        backend.render(&frame, &resources)?;
+        assert_eq!(
+            backend.render(&scene_frame, &resources)?,
+            RenderStats::default()
+        );
         backend.set_window_size(WindowSize::new(640, 480))?;
-        backend.render(&frame, &resources)?;
+        assert_eq!(backend.render(&scene_frame, &resources)?, scene_stats);
         backend.shutdown();
         assert!(backend.render(&frame, &resources).is_err());
         backend.initialize(platform.window())?;
-        backend.render(&frame, &resources)?;
+        assert_eq!(backend.render(&scene_frame, &resources)?, scene_stats);
         backend.shutdown();
         Ok(())
     }

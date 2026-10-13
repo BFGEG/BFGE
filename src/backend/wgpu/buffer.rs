@@ -1,15 +1,15 @@
 //! CPU-side mesh data prepared for GPU buffers.
 
-#![cfg_attr(
-    not(test),
-    expect(dead_code, reason = "GPU upload follows in issue #28")
-)]
-
 use crate::render::system::RenderError;
 use crate::resources::handle::MeshHandle;
 use crate::resources::manager::ResourceManager;
 use crate::resources::mesh::Mesh;
 
+use super::checked_gpu_operation;
+
+const VERTEX_BUFFER_LABEL: &str = "BFGE mesh vertices";
+const INDEX_BUFFER_LABEL: &str = "BFGE mesh indices";
+const INVALID_BUFFER_SIZE: &str = "GPU buffer data must have a nonzero 4-byte-aligned size";
 const VERTEX_COLOR: [f32; 3] = [1.0, 1.0, 1.0];
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
@@ -41,6 +41,106 @@ pub(crate) struct PreparedSubMesh<'a> {
 pub(crate) struct PreparedMesh<'a> {
     pub submeshes: Vec<PreparedSubMesh<'a>>,
     pub color: [f32; 4],
+}
+
+#[derive(Debug)]
+pub(crate) struct GpuSubMesh {
+    pub vertex_buffer: wgpu::Buffer,
+    pub index_buffer: wgpu::Buffer,
+    pub index_count: u32,
+}
+
+#[derive(Debug)]
+pub(crate) struct GpuMesh {
+    pub submeshes: Vec<GpuSubMesh>,
+    pub color: [f32; 4],
+}
+
+impl GpuMesh {
+    pub(crate) fn upload(
+        device: &wgpu::Device,
+        resources: &ResourceManager,
+        handle: MeshHandle,
+    ) -> Result<Self, RenderError> {
+        let prepared = prepare_mesh(resources, handle)?;
+        let mut submeshes = Vec::with_capacity(prepared.submeshes.len());
+
+        for (part_index, part) in prepared.submeshes.iter().enumerate() {
+            let vertex_buffer = upload_buffer(
+                device,
+                VERTEX_BUFFER_LABEL,
+                bytemuck::cast_slice(&part.vertices),
+                wgpu::BufferUsages::VERTEX,
+            )
+            .map_err(|error| {
+                RenderError::Render(format!(
+                    "upload vertices of submesh {part_index} in {handle:?}: {error}"
+                ))
+            })?;
+            let index_buffer = upload_buffer(
+                device,
+                INDEX_BUFFER_LABEL,
+                bytemuck::cast_slice(part.indices),
+                wgpu::BufferUsages::INDEX,
+            )
+            .map_err(|error| {
+                RenderError::Render(format!(
+                    "upload indices of submesh {part_index} in {handle:?}: {error}"
+                ))
+            })?;
+            let index_count = u32::try_from(part.indices.len()).map_err(|error| {
+                RenderError::Render(format!(
+                    "index count of submesh {part_index} in {handle:?}: {error}"
+                ))
+            })?;
+            submeshes.push(GpuSubMesh {
+                vertex_buffer,
+                index_buffer,
+                index_count,
+            });
+        }
+
+        Ok(Self {
+            submeshes,
+            color: prepared.color,
+        })
+    }
+}
+
+pub(crate) fn upload_buffer(
+    device: &wgpu::Device,
+    label: &'static str,
+    contents: &[u8],
+    usage: wgpu::BufferUsages,
+) -> Result<wgpu::Buffer, RenderError> {
+    let size = u64::try_from(contents.len()).map_err(|error| {
+        RenderError::Render(format!("{label} size does not fit a GPU buffer: {error}"))
+    })?;
+    if size == 0 || size % wgpu::COPY_BUFFER_ALIGNMENT != 0 {
+        Err(RenderError::Render(INVALID_BUFFER_SIZE.to_owned()))
+    } else if size > device.limits().max_buffer_size {
+        Err(RenderError::Render(format!(
+            "{label} size {size} exceeds GPU buffer limit {}",
+            device.limits().max_buffer_size
+        )))
+    } else {
+        checked_gpu_operation(device, || {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some(label),
+                size,
+                usage,
+                mapped_at_creation: true,
+            });
+            {
+                let mut mapping = buffer.get_mapped_range_mut(..).map_err(|error| {
+                    RenderError::Render(format!("map {label} for upload: {error}"))
+                })?;
+                mapping.slice(..).copy_from_slice(contents);
+            }
+            buffer.unmap();
+            Ok(buffer)
+        })?
+    }
 }
 
 pub(crate) fn prepare_mesh(

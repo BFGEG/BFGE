@@ -3,7 +3,7 @@
 use crate::platform::WindowSize;
 use crate::render::system::RenderError;
 
-use super::surface::checked_gpu_operation;
+use super::checked_gpu_operation;
 
 const DEPTH_TEXTURE_LABEL: &str = "BFGE depth texture";
 const DEPTH_VIEW_LABEL: &str = "BFGE depth view";

@@ -5,17 +5,23 @@ use std::sync::Arc;
 use winit::window::Window as NativeWindow;
 
 use crate::platform::{Window, WindowSize};
+use crate::render::stats::RenderStats;
 use crate::render::system::RenderError;
 
+use super::checked_gpu_operation;
+use super::pipeline::{MeshDraw, MeshPipeline, UniformBinding};
 use super::texture::DepthTexture;
 
 const DEVICE_LABEL: &str = "BFGE device";
 const ENCODER_LABEL: &str = "BFGE frame encoder";
-const CLEAR_PASS_LABEL: &str = "BFGE surface clear";
+const RENDER_PASS_LABEL: &str = "BFGE mesh render pass";
 const NO_CONFIGURATION: &str = "adapter does not support the window surface";
 const ACQUISITION_FAILED: &str = "surface is unavailable after recovery";
 const SURFACE_VALIDATION_FAILED: &str = "surface texture acquisition failed validation";
 const MISSING_DEPTH_TEXTURE: &str = "drawable surface has no depth texture";
+const MISSING_CAMERA_BINDING: &str = "mesh draws require a camera binding";
+const TOO_MANY_DRAWS: &str = "frame draw count exceeds u32";
+const TOO_MANY_TRIANGLES: &str = "frame triangle count exceeds u32";
 const CLEAR_COLOR: wgpu::Color = wgpu::Color::BLACK;
 const CLEAR_DEPTH: f32 = 1.0;
 const ACQUISITION_ATTEMPTS: usize = 2;
@@ -23,8 +29,7 @@ const ACQUISITION_ATTEMPTS: usize = 2;
 /// A window-bound render surface with its device and presentation queue.
 ///
 /// Zero-sized surfaces are suspended until resized to nonzero dimensions.
-/// This initialization milestone clears and presents the surface; geometry
-/// drawing is implemented separately in issue #28.
+/// Draws frame geometry and presents it to the window.
 #[derive(Debug)]
 pub struct RenderSurface {
     surface: wgpu::Surface<'static>,
@@ -134,7 +139,18 @@ impl RenderSurface {
         Ok(())
     }
 
-    pub(crate) fn clear_and_present(&mut self) -> Result<(), RenderError> {
+    pub(crate) fn render_frame(
+        &mut self,
+        pipeline: &MeshPipeline,
+        camera: Option<&UniformBinding>,
+        draws: &[MeshDraw<'_>],
+    ) -> Result<RenderStats, RenderError> {
+        let stats = draw_stats(draws)?;
+        let camera = if draws.is_empty() {
+            None
+        } else {
+            Some(camera.ok_or_else(|| RenderError::Render(MISSING_CAMERA_BINDING.to_owned()))?)
+        };
         if is_drawable(self.size) {
             if !self.configured {
                 self.configure()?;
@@ -155,8 +171,8 @@ impl RenderSurface {
                                 label: Some(ENCODER_LABEL),
                             });
                     {
-                        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some(CLEAR_PASS_LABEL),
+                        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                            label: Some(RENDER_PASS_LABEL),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                                 view: &view,
                                 depth_slice: None,
@@ -178,15 +194,20 @@ impl RenderSurface {
                             ),
                             ..Default::default()
                         });
+                        if let Some(camera) = camera {
+                            encode_mesh_draws(&mut pass, pipeline, camera, draws);
+                        }
                     }
                     self.queue.submit([encoder.finish()]);
                     self.window.pre_present_notify();
                     self.queue.present(output);
                 })?;
+                Ok(stats)
+            } else {
+                Ok(RenderStats::default())
             }
-            Ok(())
         } else {
-            Ok(())
+            Ok(RenderStats::default())
         }
     }
 
@@ -226,6 +247,41 @@ impl RenderSurface {
     }
 }
 
+fn draw_stats(draws: &[MeshDraw<'_>]) -> Result<RenderStats, RenderError> {
+    let mut stats = RenderStats::default();
+    for draw in draws {
+        for part in &draw.mesh.submeshes {
+            stats.draw_calls = stats
+                .draw_calls
+                .checked_add(1)
+                .ok_or_else(|| RenderError::Render(TOO_MANY_DRAWS.to_owned()))?;
+            stats.triangles = stats
+                .triangles
+                .checked_add(part.index_count / 3)
+                .ok_or_else(|| RenderError::Render(TOO_MANY_TRIANGLES.to_owned()))?;
+        }
+    }
+    Ok(stats)
+}
+
+fn encode_mesh_draws(
+    pass: &mut wgpu::RenderPass<'_>,
+    pipeline: &MeshPipeline,
+    camera: &UniformBinding,
+    draws: &[MeshDraw<'_>],
+) {
+    pass.set_pipeline(&pipeline.render_pipeline);
+    pass.set_bind_group(0, camera.group(), &[]);
+    for draw in draws {
+        pass.set_bind_group(1, draw.uniform.group(), &[]);
+        for part in &draw.mesh.submeshes {
+            pass.set_vertex_buffer(0, part.vertex_buffer.slice(..));
+            pass.set_index_buffer(part.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..part.index_count, 0, 0..1);
+        }
+    }
+}
+
 fn is_drawable(size: WindowSize) -> bool {
     size.width != 0 && size.height != 0
 }
@@ -241,32 +297,16 @@ fn validate_surface_size(size: WindowSize, limit: u32) -> Result<(), RenderError
     }
 }
 
-pub(super) fn checked_gpu_operation<T>(
-    device: &wgpu::Device,
-    operation: impl FnOnce() -> T,
-) -> Result<T, RenderError> {
-    let scopes = [
-        wgpu::ErrorFilter::OutOfMemory,
-        wgpu::ErrorFilter::Internal,
-        wgpu::ErrorFilter::Validation,
-    ]
-    .map(|filter| device.push_error_scope(filter));
-    let result = operation();
-    let errors = scopes
-        .into_iter()
-        .rev()
-        .filter_map(|scope| pollster::block_on(scope.pop()))
-        .map(|error| error.to_string())
-        .collect::<Vec<_>>();
-    if errors.is_empty() {
-        Ok(result)
-    } else {
-        Err(RenderError::Render(errors.join("; ")))
-    }
-}
-
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use crate::math::{Mat4, Vec3};
+    use crate::render::frame::{RenderCamera, RenderItem};
+    use crate::resources::manager::ResourceManager;
+    use crate::resources::mesh::{Mesh, SubMesh, Vertex};
+
+    use super::super::buffer::GpuMesh;
     use super::*;
 
     #[test]
@@ -290,5 +330,156 @@ mod tests {
             validate_surface_size(WindowSize::new(800, 2049), 2048),
             Err(RenderError::Render(_))
         ));
+    }
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn shared_composite_mesh_draws_every_part_at_each_transform()
+    -> Result<(), Box<dyn std::error::Error>> {
+        const WIDTH: u32 = 64;
+        const HEIGHT: u32 = 64;
+        const BYTES_PER_ROW: u32 = WIDTH * 4;
+
+        let instance = wgpu::Instance::default();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+        let pipeline = MeshPipeline::new(&device, wgpu::TextureFormat::Rgba8Unorm)?;
+        let color_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: WIDTH,
+                height: HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth = DepthTexture::new(&device, WindowSize::new(WIDTH, HEIGHT))?;
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(BYTES_PER_ROW) * u64::from(HEIGHT),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let part = |x: f32| SubMesh {
+            vertices: [
+                Vec3::new(x - 0.2, -0.2, 0.5),
+                Vec3::new(x + 0.2, -0.2, 0.5),
+                Vec3::new(x, 0.2, 0.5),
+            ]
+            .map(|position| Vertex { position })
+            .to_vec(),
+            indices: vec![0, 1, 2],
+        };
+        let mut resources = ResourceManager::new();
+        let handle = resources.add_mesh(Mesh {
+            submeshes: vec![part(-0.25), part(0.25)],
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+        let mesh = GpuMesh::upload(&device, &resources, handle)?;
+        let camera = pipeline.bind_camera(
+            &device,
+            &RenderCamera {
+                view: Mat4::IDENTITY,
+                projection: Mat4::IDENTITY,
+            },
+        )?;
+        let draws = [-0.4, 0.4]
+            .into_iter()
+            .map(|x| {
+                let item = RenderItem {
+                    world_transform: Mat4::from_translation(Vec3::new(x, 0.0, 0.0)),
+                    mesh: handle,
+                };
+                Ok(MeshDraw {
+                    mesh: &mesh,
+                    uniform: pipeline.bind_mesh(&device, &item, mesh.color)?,
+                })
+            })
+            .collect::<Result<Vec<_>, RenderError>>()?;
+        assert_eq!(
+            draw_stats(&draws)?,
+            RenderStats {
+                draw_calls: 4,
+                triangles: 4
+            }
+        );
+
+        let submission = checked_gpu_operation(&device, || {
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &color_view,
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: depth.view(),
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(1.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    ..Default::default()
+                });
+                encode_mesh_draws(&mut pass, &pipeline, &camera, &draws);
+            }
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &color_target,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &readback,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(BYTES_PER_ROW),
+                        rows_per_image: Some(HEIGHT),
+                    },
+                },
+                color_target.size(),
+            );
+            queue.submit([encoder.finish()])
+        })?;
+        let (sender, receiver) = std::sync::mpsc::channel();
+        readback.map_async(wgpu::MapMode::Read, .., move |result| {
+            let _ = sender.send(result);
+        });
+        device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submission),
+            timeout: Some(Duration::from_secs(5)),
+        })?;
+        receiver.recv_timeout(Duration::from_secs(5))??;
+        let pixels = readback.get_mapped_range(..)?;
+        let pixel = |x: usize| -> &[u8] {
+            let start = (32 * WIDTH as usize + x) * 4;
+            pixels
+                .get(start..start + 3)
+                .expect("sample coordinates fit the readback buffer")
+        };
+        for x in [11, 27, 37, 53] {
+            assert_eq!(pixel(x), &[255, 0, 0]);
+        }
+        assert_eq!(pixel(32), &[0, 0, 0]);
+        drop(pixels);
+        readback.unmap();
+        Ok(())
     }
 }
