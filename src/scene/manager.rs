@@ -26,7 +26,7 @@ impl SceneManager {
     pub fn new() -> Self {
         Self {
             root: SceneNodeId(0),
-            nodes: vec![SceneNode::new(None)],
+            nodes: vec![SceneNode::default()],
             objects: Vec::new(),
             viewpoint: ViewpointState::default(),
         }
@@ -142,7 +142,11 @@ impl SceneApi for SceneManager {
         }
 
         let id = SceneNodeId(self.nodes.len() as u32);
-        self.nodes.push(SceneNode::new(Some(parent)));
+        let node = SceneNode {
+            parent: Some(parent),
+            ..Default::default()
+        };
+        self.nodes.push(node);
         self.nodes[parent.0 as usize].children.push(id);
 
         Ok(id)
