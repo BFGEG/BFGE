@@ -7,13 +7,17 @@ use winit::window::Window as NativeWindow;
 use crate::platform::{Window, WindowSize};
 use crate::render::system::RenderError;
 
+use super::texture::DepthTexture;
+
 const DEVICE_LABEL: &str = "BFGE device";
 const ENCODER_LABEL: &str = "BFGE frame encoder";
 const CLEAR_PASS_LABEL: &str = "BFGE surface clear";
 const NO_CONFIGURATION: &str = "adapter does not support the window surface";
 const ACQUISITION_FAILED: &str = "surface is unavailable after recovery";
 const SURFACE_VALIDATION_FAILED: &str = "surface texture acquisition failed validation";
+const MISSING_DEPTH_TEXTURE: &str = "drawable surface has no depth texture";
 const CLEAR_COLOR: wgpu::Color = wgpu::Color::BLACK;
+const CLEAR_DEPTH: f32 = 1.0;
 const ACQUISITION_ATTEMPTS: usize = 2;
 
 /// A window-bound render surface with its device and presentation queue.
@@ -27,6 +31,7 @@ pub struct RenderSurface {
     config: wgpu::SurfaceConfiguration,
     size: WindowSize,
     configured: bool,
+    depth: Option<DepthTexture>,
     adapter: wgpu::Adapter,
     device: wgpu::Device,
     queue: wgpu::Queue,
@@ -81,6 +86,7 @@ impl RenderSurface {
             config,
             size,
             configured: false,
+            depth: None,
             adapter,
             device,
             queue,
@@ -96,12 +102,14 @@ impl RenderSurface {
     pub(crate) fn resize(&mut self, size: WindowSize) -> Result<(), RenderError> {
         validate_surface_size(size, self.device.limits().max_texture_dimension_2d)?;
         if is_drawable(size) {
+            let depth = DepthTexture::new(&self.device, size)?;
             let previous_dimensions = (self.config.width, self.config.height);
             self.config.width = size.width;
             self.config.height = size.height;
             match self.configure() {
                 Ok(()) => {
                     self.size = size;
+                    self.depth = Some(depth);
                     Ok(())
                 }
                 Err(error) => {
@@ -112,6 +120,7 @@ impl RenderSurface {
         } else {
             self.size = size;
             self.configured = false;
+            self.depth = None;
             Ok(())
         }
     }
@@ -131,6 +140,11 @@ impl RenderSurface {
                 self.configure()?;
             }
             if let Some(output) = self.acquire()? {
+                let depth_view = self
+                    .depth
+                    .as_ref()
+                    .ok_or_else(|| RenderError::Render(MISSING_DEPTH_TEXTURE.to_owned()))?
+                    .view();
                 checked_gpu_operation(&self.device, || {
                     let view = output
                         .texture
@@ -152,6 +166,16 @@ impl RenderSurface {
                                     store: wgpu::StoreOp::Store,
                                 },
                             })],
+                            depth_stencil_attachment: Some(
+                                wgpu::RenderPassDepthStencilAttachment {
+                                    view: depth_view,
+                                    depth_ops: Some(wgpu::Operations {
+                                        load: wgpu::LoadOp::Clear(CLEAR_DEPTH),
+                                        store: wgpu::StoreOp::Store,
+                                    }),
+                                    stencil_ops: None,
+                                },
+                            ),
                             ..Default::default()
                         });
                     }

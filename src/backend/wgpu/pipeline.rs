@@ -7,6 +7,7 @@ use crate::render::system::RenderError;
 
 use super::buffer::GpuVertex;
 use super::surface::checked_gpu_operation;
+use super::texture::DEPTH_FORMAT;
 
 const SHADER_LABEL: &str = "BFGE mesh shader";
 const CAMERA_LAYOUT_LABEL: &str = "BFGE camera uniforms";
@@ -88,7 +89,13 @@ impl MeshPipeline {
                     buffers: &[Some(GpuVertex::layout())],
                 },
                 primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Less),
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
