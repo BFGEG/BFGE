@@ -82,6 +82,17 @@ impl SavedObject {
     }
 }
 
+/// Visit state of a node during parent-chain cycle detection.
+#[derive(Clone, Copy)]
+enum VisitState {
+    /// The node has not been visited yet.
+    Unvisited,
+    /// The node belongs to the chain currently being walked.
+    InProgress,
+    /// The node's chain reaches the root without a cycle.
+    Done,
+}
+
 impl SavedScene {
     /// Checks the saved state for structural integrity before it is applied.
     ///
@@ -143,18 +154,18 @@ impl SavedScene {
         // The parent relation must not loop: frame building walks the tree from
         // the root, and a cycle would recurse without bound. Every node except
         // the root has a parent, so an acyclic chain always ends at the root.
-        let mut state = vec![0u8; node_count];
+        let mut state = vec![VisitState::Unvisited; node_count];
         for start in 0..node_count {
             let mut chain = Vec::new();
             let mut current = start;
             loop {
                 match state[current] {
-                    1 => {
+                    VisitState::InProgress => {
                         return Err(format!("parent chain of node {start} contains a cycle"));
                     }
-                    2 => break,
-                    _ => {
-                        state[current] = 1;
+                    VisitState::Done => break,
+                    VisitState::Unvisited => {
+                        state[current] = VisitState::InProgress;
                         chain.push(current);
                         let Some(parent) = self.nodes[current].parent else {
                             break;
@@ -164,7 +175,7 @@ impl SavedScene {
                 }
             }
             for node in chain {
-                state[node] = 2;
+                state[node] = VisitState::Done;
             }
         }
 
