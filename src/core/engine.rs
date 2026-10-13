@@ -3,10 +3,15 @@
 use std::path::Path;
 use std::time::Duration;
 
+use winit::event_loop::EventLoop;
+
 use crate::core::api::EngineApi;
 use crate::core::engine_loop::{EngineEvent, EngineLoop};
 use crate::core::error::EngineError;
-use crate::platform::{PlatformAdapter, WindowDescriptor, WindowSize, validate_window_size};
+use crate::platform::{
+    PlatformAdapter, PlatformError, WindowDescriptor, WindowSize, new_event_loop,
+    validate_window_size,
+};
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::systems::lifecycle::{self, EngineParts};
@@ -19,10 +24,16 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 /// The current skeleton supports construction, scene access and frame handler
 /// registration, window creation and GPU initialization. The main loop is not
 /// implemented yet; loop startup reports this limitation through an error.
+///
+/// A session is the interval between [`EngineApi::initialize`] and
+/// [`EngineApi::shutdown`]. The engine itself, its event loop and its scene
+/// store survive shutdown; the window, the platform adapter and `scene` and
+/// `resources` are recreated per session.
 pub struct Engine {
     parts: EngineParts,
     event_loop: EngineLoop,
     platform: Option<PlatformAdapter>,
+    winit_loop: Option<EventLoop<()>>,
 }
 
 impl Engine {
@@ -32,6 +43,7 @@ impl Engine {
             parts: lifecycle::create(),
             event_loop: EngineLoop::default(),
             platform: None,
+            winit_loop: None,
         }
     }
 
@@ -39,6 +51,20 @@ impl Engine {
         lifecycle::initialize(&mut self.parts, platform.window())?;
         self.platform = Some(platform);
         Ok(())
+    }
+
+    /// Returns the engine's winit event loop, creating it on first use.
+    ///
+    /// The loop is created once and reused by every following session; winit
+    /// allows a single loop per process (see Wgpu_Backend.md).
+    fn acquire_event_loop(&mut self) -> Result<&mut EventLoop<()>, EngineError> {
+        if self.winit_loop.is_none() {
+            self.winit_loop = Some(new_event_loop()?);
+        }
+        match &mut self.winit_loop {
+            Some(event_loop) => Ok(event_loop),
+            None => Err(EngineError::Platform(PlatformError::MissingEventLoop)),
+        }
     }
 
     #[allow(dead_code)] // driven by EngineLoop (milestone 2)
@@ -63,7 +89,9 @@ impl EngineApi for Engine {
         if self.platform.is_some() {
             Err(EngineError::AlreadyInitialized)
         } else {
-            let platform = PlatformAdapter::new(window)?;
+            validate_window_size(window.size)?;
+            let event_loop = self.acquire_event_loop()?;
+            let platform = PlatformAdapter::new(window, event_loop)?;
             self.initialize_platform(platform)
         }
     }
@@ -139,12 +167,15 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    use crate::math::Vec3;
     use crate::platform::Window;
     use crate::render::frame::RenderFrame;
     use crate::render::renderer::Renderer;
     use crate::render::stats::RenderStats;
     use crate::render::system::{RenderError, RenderSystem};
+    use crate::resources::library::{BuiltinMesh, MeshLibrary};
     use crate::resources::manager::ResourceManager;
+    use crate::scene::transform::Transform;
 
     use super::*;
 
@@ -366,5 +397,147 @@ mod tests {
             *calls.borrow(),
             [(0, true), (0, false), (1, true), (1, false)]
         );
+    }
+
+    #[test]
+    fn invalid_window_size_fails_before_event_loop_acquisition() {
+        let mut engine = Engine::new();
+
+        assert!(matches!(
+            engine.initialize(WindowDescriptor::new(TEST_WINDOW_TITLE, 0, 600)),
+            Err(EngineError::Platform(
+                crate::platform::PlatformError::InvalidWindowSize(_)
+            ))
+        ));
+        assert!(engine.winit_loop.is_none());
+    }
+
+    #[test]
+    fn scene_survives_save_shutdown_reinitialize_and_restore() {
+        let (mut engine, _state) = engine_with_backend();
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("the test backend accepts initialization");
+
+        let root = engine.parts.scene.root_node();
+        let child = engine
+            .parts
+            .scene
+            .create_node(root)
+            .expect("the root node exists");
+        engine
+            .parts
+            .scene
+            .set_node_transform(
+                child,
+                Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
+            )
+            .expect("the created node exists");
+        let mesh = engine
+            .parts
+            .resources
+            .add_mesh(MeshLibrary::build(BuiltinMesh::Cube));
+        let object = engine
+            .parts
+            .scene
+            .create_object(mesh, child)
+            .expect("the created node exists");
+
+        let before = engine.parts.scene.build_render_frame(TEST_SIZE);
+        engine.save_scene().expect("in-memory save cannot fail");
+        engine
+            .shutdown()
+            .expect("the test backend supports shutdown");
+
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("reinitialization succeeds for the test backend");
+        assert!(engine.parts.scene.objects().is_empty());
+
+        engine
+            .restore_scene()
+            .expect("restore succeeds into an empty scene");
+        let after = engine.parts.scene.build_render_frame(TEST_SIZE);
+        assert_eq!(before.camera, after.camera);
+        assert_eq!(before.items, after.items);
+        assert!(
+            engine
+                .parts
+                .scene
+                .objects()
+                .get(object.0 as usize)
+                .is_some()
+        );
+        let expected = MeshLibrary::build(BuiltinMesh::Cube);
+        assert_eq!(engine.parts.resources.mesh(mesh), Some(&expected));
+    }
+
+    #[test]
+    fn restore_rejects_non_empty_scene_without_prior_save() {
+        let (mut engine, _state) = engine_with_backend();
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("the test backend accepts initialization");
+
+        let root = engine.parts.scene.root_node();
+        let mesh = engine
+            .parts
+            .resources
+            .add_mesh(MeshLibrary::build(BuiltinMesh::Cube));
+        engine
+            .parts
+            .scene
+            .create_object(mesh, root)
+            .expect("the root node exists");
+
+        assert!(matches!(
+            engine.restore_scene(),
+            Err(ScenePersistenceError::SceneNotEmpty)
+        ));
+    }
+
+    #[test]
+    fn restore_without_save_into_empty_scene_is_a_noop() {
+        let (mut engine, _state) = engine_with_backend();
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("the test backend accepts initialization");
+
+        assert!(engine.restore_scene().is_ok());
+        assert!(engine.parts.scene.objects().is_empty());
+        assert!(engine.parts.scene.nodes().len() == 1);
+    }
+
+    #[test]
+    fn store_and_frame_handlers_survive_shutdown_and_reinitialization() {
+        let (mut engine, _state) = engine_with_backend();
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("the test backend accepts initialization");
+        engine
+            .parts
+            .resources
+            .add_mesh(MeshLibrary::build(BuiltinMesh::Cube));
+        engine.save_scene().expect("in-memory save cannot fail");
+        let registered = engine.event_loop.callbacks().len();
+        engine
+            .add_event(EngineEvent {
+                frame_started: Box::new(|_, _| Ok(())),
+                frame_ended: Box::new(|_, _| Ok(())),
+            })
+            .expect("frame handlers can be registered before initialization");
+
+        engine
+            .shutdown()
+            .expect("the test backend supports shutdown");
+        engine
+            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
+            .expect("reinitialization succeeds for the test backend");
+
+        assert_eq!(engine.event_loop.callbacks().len(), registered + 1);
+        engine
+            .restore_scene()
+            .expect("restore succeeds into an empty scene");
+        assert_eq!(engine.parts.resources.meshes().len(), 1);
     }
 }

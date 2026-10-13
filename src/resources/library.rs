@@ -91,6 +91,7 @@ impl MeshLibrary {
     }
 
     /// Builds a unit cube centered at the origin with outward-facing winding.
+    #[allow(dead_code)]
     fn cube() -> Mesh {
         let mut vertices = Vec::with_capacity(CUBE_FACES.len() * 4);
         let mut indices = Vec::with_capacity(CUBE_FACES.len() * 6);
