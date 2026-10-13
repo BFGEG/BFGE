@@ -35,7 +35,6 @@ impl ResourceManager {
         }
     }
 
-    #[allow(dead_code)] // read by [BKD]/[SCN]
     pub(crate) fn mesh(&self, handle: MeshHandle) -> Option<&Mesh> {
         self.meshes.get(handle.index() as usize)
     }

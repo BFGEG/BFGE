@@ -1,24 +1,32 @@
 //! wgpu-backed graphics system.
 
+use std::collections::{HashMap, hash_map::Entry};
+
 use crate::platform::{Window, WindowSize};
 use crate::render::frame::RenderFrame;
 use crate::render::stats::RenderStats;
 use crate::render::system::{RenderError, RenderSystem};
 use crate::resources::manager::ResourceManager;
 
+use super::buffer::GpuMesh;
+use super::pipeline::{MeshDraw, MeshPipeline};
 use super::surface::RenderSurface;
 
 const ALREADY_INITIALIZED: &str = "wgpu backend is already initialized";
 const NOT_INITIALIZED: &str = "wgpu backend is not initialized";
-const DRAWING_UNAVAILABLE: &str = "mesh drawing is not implemented (issue #13)";
 
 /// Graphics system based on wgpu.
 ///
-/// Initializes the GPU and presents cleared frames. Mesh drawing is deferred
-/// to issue #13; nonempty frames return an error instead of dropping geometry.
+/// Initializes the GPU and draws frame meshes into the window surface.
 #[derive(Debug, Default)]
 pub struct WgpuRenderSystem {
-    surface: Option<RenderSurface>,
+    state: Option<WgpuState>,
+}
+
+#[derive(Debug)]
+struct WgpuState {
+    surface: RenderSurface,
+    pipeline: MeshPipeline,
 }
 
 impl WgpuRenderSystem {
@@ -30,40 +38,71 @@ impl WgpuRenderSystem {
 
 impl RenderSystem for WgpuRenderSystem {
     fn initialize(&mut self, window: &Window) -> Result<(), RenderError> {
-        if self.surface.is_some() {
+        if self.state.is_some() {
             Err(RenderError::Initialization(ALREADY_INITIALIZED.to_owned()))
         } else {
-            self.surface = Some(RenderSurface::new(window)?);
+            let surface = RenderSurface::new(window)?;
+            let pipeline = MeshPipeline::new(surface.device(), surface.format())?;
+            self.state = Some(WgpuState { surface, pipeline });
             Ok(())
         }
     }
 
     fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
-        self.surface
+        self.state
             .as_mut()
             .ok_or_else(|| RenderError::Render(NOT_INITIALIZED.to_owned()))?
+            .surface
             .resize(size)
     }
 
     fn render(
         &mut self,
         frame: &RenderFrame,
-        _resources: &ResourceManager,
+        resources: &ResourceManager,
     ) -> Result<RenderStats, RenderError> {
-        let surface = self
-            .surface
+        let state = self
+            .state
             .as_mut()
             .ok_or_else(|| RenderError::Render(NOT_INITIALIZED.to_owned()))?;
-        if frame.items.is_empty() {
-            surface.clear_and_present()?;
-            Ok(RenderStats::default())
-        } else {
-            Err(RenderError::Render(DRAWING_UNAVAILABLE.to_owned()))
+
+        let mut meshes = HashMap::new();
+        for item in &frame.items {
+            if let Entry::Vacant(entry) = meshes.entry(item.mesh) {
+                entry.insert(GpuMesh::upload(
+                    state.surface.device(),
+                    resources,
+                    item.mesh,
+                )?);
+            }
         }
+        let camera = frame
+            .items
+            .first()
+            .map(|_| {
+                state
+                    .pipeline
+                    .bind_camera(state.surface.device(), &frame.camera)
+            })
+            .transpose()?;
+        let mut draws = Vec::with_capacity(frame.items.len());
+        for item in &frame.items {
+            let mesh = meshes.get(&item.mesh).ok_or_else(|| {
+                RenderError::Render(format!("mesh {:?} was not uploaded", item.mesh))
+            })?;
+            let uniform = state
+                .pipeline
+                .bind_mesh(state.surface.device(), item, mesh.color)?;
+            draws.push(MeshDraw { mesh, uniform });
+        }
+
+        state
+            .surface
+            .render_frame(&state.pipeline, camera.as_ref(), &draws)
     }
 
     fn shutdown(&mut self) {
-        self.surface = None;
+        self.state = None;
     }
 }
 
