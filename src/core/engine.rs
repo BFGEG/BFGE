@@ -1,12 +1,14 @@
 //! Engine facade and orchestrator.
 
 use std::path::Path;
-use std::time::Duration;
+use std::time::Instant;
 
 use crate::core::api::EngineApi;
-use crate::core::engine_loop::{EngineEvent, EngineLoop};
+use crate::core::engine_loop::{EngineEvent, EngineLoop, EventTime, InternalEvent};
 use crate::core::error::EngineError;
-use crate::platform::{PlatformAdapter, WindowDescriptor, WindowSize, validate_window_size};
+use crate::platform::{
+    PlatformAdapter, PlatformEvent, WindowDescriptor, WindowSize, validate_window_size,
+};
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::systems::lifecycle::{self, EngineParts};
@@ -17,8 +19,8 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 /// renderer, window and the frame lifecycle.
 ///
 /// The current skeleton supports construction, scene access and frame handler
-/// registration, window creation and GPU initialization. The main loop is not
-/// implemented yet; loop startup reports this limitation through an error.
+/// registration, window creation and GPU initialization. The main loop drives
+/// frame handlers, frame build, render and present until the window is closed.
 pub struct Engine {
     parts: EngineParts,
     event_loop: EngineLoop,
@@ -41,15 +43,51 @@ impl Engine {
         Ok(())
     }
 
-    #[allow(dead_code)] // driven by EngineLoop (milestone 2)
-    fn update(&mut self, _dt: Duration) -> Result<(), EngineError> {
-        todo!("milestone 2")
+    /// One frame step: builds the frame from the current window size and
+    /// presents it through the renderer.
+    fn render(&mut self) -> Result<(), EngineError> {
+        let platform = self.platform.as_ref().ok_or(EngineError::NotInitialized)?;
+        let window_size = platform.window().size();
+        let frame = self.parts.scene.build_render_frame(window_size);
+        self.parts.renderer.render(&frame, &self.parts.resources)?;
+        Ok(())
     }
 
-    #[allow(dead_code)] // driven by EngineLoop (milestone 2)
-    fn render(&mut self) -> Result<(), EngineError> {
-        todo!("milestone 2")
+    /// Runs one pass: user frame handlers around the render step.
+    fn frame_pass(&mut self, event_time: &EventTime) -> Result<(), EngineError> {
+        process_frame_started_events(&mut self.parts, &mut self.event_loop, event_time)?;
+        self.render()?;
+        process_frame_ended_events(&mut self.parts, &mut self.event_loop, event_time)?;
+        Ok(())
     }
+}
+
+fn process_frame_started_events(
+    parts: &mut EngineParts,
+    event_loop: &mut EngineLoop,
+    event_time: &EventTime,
+) -> Result<(), EngineError> {
+    for event in event_loop.callbacks() {
+        let result = (event.frame_started)(&mut parts.scene, event_time);
+        if result.is_err() {
+            return Err(EngineError::EventError);
+        }
+    }
+    Ok(())
+}
+
+fn process_frame_ended_events(
+    parts: &mut EngineParts,
+    event_loop: &mut EngineLoop,
+    event_time: &EventTime,
+) -> Result<(), EngineError> {
+    for event in event_loop.callbacks() {
+        let result = (event.frame_ended)(&mut parts.scene, event_time);
+        if result.is_err() {
+            return Err(EngineError::EventError);
+        }
+    }
+    Ok(())
 }
 
 impl Default for Engine {
@@ -61,20 +99,72 @@ impl Default for Engine {
 impl EngineApi for Engine {
     fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError> {
         if self.platform.is_some() {
-            Err(EngineError::AlreadyInitialized)
-        } else {
-            let platform = PlatformAdapter::new(window)?;
-            self.initialize_platform(platform)
+            return Err(EngineError::AlreadyInitialized);
         }
+        let platform = PlatformAdapter::new(window)?;
+        self.initialize_platform(platform)
     }
 
     fn run(&mut self) -> Result<(), EngineError> {
         if self.platform.is_none() {
-            Err(EngineError::NotInitialized)
-        } else {
-            // TODO(issue #15): implement the main loop and frame event delivery.
-            Err(EngineError::RunUnavailable)
+            return Err(EngineError::NotInitialized);
         }
+
+        self.event_loop.set_running(true);
+        self.event_loop.push_internal(InternalEvent::Tick);
+
+        let mut last_frame = Instant::now();
+
+        while self.event_loop.is_running() {
+            let events = if let Some(platform) = self.platform.as_mut() {
+                platform.pump_events()
+            } else {
+                Vec::new()
+            };
+            for event in events {
+                match event {
+                    PlatformEvent::Resized(size) => {
+                        self.event_loop
+                            .push_internal(InternalEvent::WindowResized(size));
+                    }
+                    PlatformEvent::CloseRequested => {
+                        self.event_loop.push_internal(InternalEvent::WindowClosed);
+                    }
+                }
+            }
+
+            while self.event_loop.is_running() {
+                let Some(event) = self.event_loop.next_internal() else {
+                    break;
+                };
+                match event {
+                    InternalEvent::Tick => {
+                        let now = Instant::now();
+                        let delta = now.duration_since(last_frame).as_secs_f32();
+                        last_frame = now;
+                        let event_time = EventTime {
+                            time_since_last_event: delta,
+                            time_since_last_frame: delta,
+                        };
+                        self.frame_pass(&event_time)?;
+                    }
+                    InternalEvent::WindowResized(size) => {
+                        self.parts.renderer.set_window_size(size)?;
+                    }
+                    InternalEvent::WindowClosed => {
+                        self.event_loop.set_running(false);
+                        break;
+                    }
+                }
+            }
+
+            if self.event_loop.is_running() {
+                self.event_loop.push_internal(InternalEvent::Tick);
+            }
+        }
+
+        self.event_loop.set_running(false);
+        Ok(())
     }
 
     fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError> {
@@ -84,12 +174,11 @@ impl EngineApi for Engine {
 
     fn shutdown(&mut self) -> Result<(), EngineError> {
         if self.platform.is_none() {
-            Err(EngineError::NotInitialized)
-        } else {
-            lifecycle::shutdown(&mut self.parts)?;
-            self.platform = None;
-            Ok(())
+            return Err(EngineError::NotInitialized);
         }
+        lifecycle::shutdown(&mut self.parts)?;
+        self.platform = None;
+        Ok(())
     }
 
     fn scene(&mut self) -> &mut dyn SceneApi {
@@ -180,11 +269,10 @@ mod tests {
         fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
             let mut state = self.0.borrow_mut();
             if state.fail_resize {
-                Err(RenderError::Render(BACKEND_FAILURE.to_owned()))
-            } else {
-                state.size = Some(size);
-                Ok(())
+                return Err(RenderError::Render(BACKEND_FAILURE.to_owned()));
             }
+            state.size = Some(size);
+            Ok(())
         }
 
         fn render(

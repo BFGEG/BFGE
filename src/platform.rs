@@ -88,15 +88,26 @@ impl Window {
     }
 }
 
+/// Platform-level window event delivered by pumping the event loop.
+///
+/// Crate-private: `core` maps these onto its internal loop events.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlatformEvent {
+    /// The window was resized.
+    Resized(WindowSize),
+    /// The user requested the window to close.
+    CloseRequested,
+}
+
 /// Owns the engine's window and delivers its events (close, resize).
 ///
 /// The client does not create or manage the window; it only supplies a
 /// [`WindowDescriptor`]. Creation must run on the application's main thread.
-/// The event loop is retained for the frame driver implemented in issue #15.
+/// The event loop is pumped by the frame driver to deliver window events.
 #[derive(Debug)]
 pub struct PlatformAdapter {
     window: Window,
-    _event_loop: Option<EventLoop<()>>,
+    event_loop: Option<EventLoop<()>>,
 }
 
 impl PlatformAdapter {
@@ -124,13 +135,22 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Native(native),
             },
-            _event_loop: Some(event_loop),
+            event_loop: Some(event_loop),
         })
     }
 
     /// Returns the engine's window.
     pub(crate) fn window(&self) -> &Window {
         &self.window
+    }
+
+    /// Pumps queued window events and returns them.
+    pub(crate) fn pump_events(&mut self) -> Vec<PlatformEvent> {
+        let mut pump = EventPump { events: Vec::new() };
+        if let Some(event_loop) = &mut self.event_loop {
+            event_loop.pump_app_events(Some(Duration::ZERO), &mut pump);
+        }
+        pump.events
     }
 
     /// Resizes the window.
@@ -153,7 +173,7 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Test(size),
             },
-            _event_loop: None,
+            event_loop: None,
         }
     }
 }
@@ -170,7 +190,6 @@ struct WindowBootstrap {
     descriptor: WindowDescriptor,
     result: Option<Result<Arc<NativeWindow>, PlatformError>>,
 }
-
 impl ApplicationHandler for WindowBootstrap {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.result.is_none() {
@@ -195,6 +214,32 @@ impl ApplicationHandler for WindowBootstrap {
         _window_id: WindowId,
         _event: WindowEvent,
     ) {
+    }
+}
+
+struct EventPump {
+    events: Vec<PlatformEvent>,
+}
+
+impl ApplicationHandler for EventPump {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        match event {
+            WindowEvent::CloseRequested => self.events.push(PlatformEvent::CloseRequested),
+            WindowEvent::Resized(size) => {
+                self.events.push(PlatformEvent::Resized(WindowSize::new(
+                    size.width,
+                    size.height,
+                )));
+            }
+            _ => {}
+        }
     }
 }
 
