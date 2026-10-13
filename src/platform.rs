@@ -218,6 +218,7 @@ mod tests {
     use super::*;
 
     const TEST_WINDOW_TITLE: &str = "BFGE wgpu smoke test";
+    const PREVIEW_WINDOW_TITLE: &str = "BFGE cube preview";
 
     #[test]
     fn zero_width_is_rejected_before_creating_event_loop() {
@@ -315,6 +316,134 @@ mod tests {
         backend.initialize(platform.window())?;
         assert_eq!(backend.render(&scene_frame, &resources)?, scene_stats);
         backend.shutdown();
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    #[ignore = "opens a GPU window until it is closed manually"]
+    fn native_cube_preview_renders_until_closed() -> Result<(), Box<dyn std::error::Error>> {
+        const REAR_X: f32 = 1.5;
+        const FRONT_Z: f32 = 1.8;
+
+        #[cfg(target_os = "windows")]
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        #[cfg(target_os = "linux")]
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        use crate::backend::wgpu::backend::WgpuRenderSystem;
+        use crate::math::{self, Mat4, Vec3};
+        use crate::render::frame::{RenderCamera, RenderFrame, RenderItem};
+        use crate::render::system::RenderSystem;
+        use crate::resources::library::BuiltinMesh;
+        use crate::resources::manager::ResourceManager;
+
+        #[derive(Default)]
+        struct PreviewEvents {
+            close_requested: bool,
+        }
+
+        impl ApplicationHandler for PreviewEvents {
+            fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+            fn window_event(
+                &mut self,
+                _event_loop: &ActiveEventLoop,
+                _window_id: WindowId,
+                event: WindowEvent,
+            ) {
+                if let WindowEvent::CloseRequested = event {
+                    self.close_requested = true;
+                }
+            }
+        }
+
+        let event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let mut platform = PlatformAdapter::create_window(
+            WindowDescriptor::new(PREVIEW_WINDOW_TITLE, 800, 600),
+            event_loop,
+        )?;
+        let mut backend = WgpuRenderSystem::new();
+        backend.initialize(platform.window())?;
+
+        let mut resources = ResourceManager::new();
+        let cube = resources.builtin(BuiltinMesh::Cube);
+        let mut red_cube = resources
+            .mesh(cube)
+            .expect("builtin cube is registered in the resource manager")
+            .clone();
+        red_cube.color = [0.9, 0.2, 0.1, 1.0];
+        let red_cube = resources.add_mesh(red_cube);
+        let rotation = Mat4::from_rotation_y(0.5) * Mat4::from_rotation_x(0.3);
+        let mut frame = RenderFrame {
+            camera: RenderCamera {
+                view: math::view(Vec3::new(0.0, 0.0, 4.5), Vec3::NEG_Z),
+                projection: Mat4::IDENTITY,
+            },
+            items: [
+                (0.0, FRONT_Z, red_cube),
+                (-REAR_X, 0.0, cube),
+                (REAR_X, 0.0, cube),
+            ]
+            .into_iter()
+            .map(|(x, z, mesh)| RenderItem {
+                world_transform: Mat4::from_translation(Vec3::new(x, 0.0, z)) * rotation,
+                mesh,
+            })
+            .collect(),
+        };
+        let mut events = PreviewEvents::default();
+        let mut surface_size = platform.window().size();
+        let mut resized = false;
+        let mut presented = false;
+        let mut presented_after_resize = false;
+        println!("Resize the cube preview window, then close it to finish the test.");
+
+        loop {
+            platform
+                ._event_loop
+                .as_mut()
+                .expect("the native platform owns an event loop")
+                .pump_app_events(Some(Duration::from_millis(16)), &mut events);
+            if events.close_requested {
+                break;
+            }
+
+            let actual_size = platform.window().size();
+            if actual_size != surface_size {
+                backend.set_window_size(actual_size)?;
+                surface_size = actual_size;
+                resized = true;
+            }
+            let aspect_ratio = if actual_size.width == 0 || actual_size.height == 0 {
+                1.0
+            } else {
+                actual_size.width as f32 / actual_size.height as f32
+            };
+            frame.camera.projection = math::perspective(60.0_f32.to_radians(), aspect_ratio);
+            let stats = backend.render(&frame, &resources)?;
+            if stats.draw_calls != 0 {
+                assert_eq!(stats.draw_calls, 3);
+                assert_eq!(stats.triangles, 36);
+                if !presented || (resized && !presented_after_resize) {
+                    println!(
+                        "Rendered {}x{}: {} draw calls, {} triangles",
+                        actual_size.width, actual_size.height, stats.draw_calls, stats.triangles
+                    );
+                }
+                presented = true;
+                if resized {
+                    presented_after_resize = true;
+                }
+            }
+        }
+
+        backend.shutdown();
+        assert!(presented, "no cube frame was presented");
+        assert!(
+            presented_after_resize,
+            "resize the cube preview window before closing it"
+        );
         Ok(())
     }
 }
