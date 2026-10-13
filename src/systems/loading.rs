@@ -18,7 +18,6 @@ type LoadResult<T> = std::result::Result<T, ModelLoadError>;
 
 /// Model loading error.
 #[derive(Debug, thiserror::Error)]
-#[non_exhaustive]
 pub enum ModelLoadError {
     /// Failed to attach the model to the requested scene node.
     #[error("failed to attach model: {0}")]
