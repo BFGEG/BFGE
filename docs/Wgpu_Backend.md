@@ -65,9 +65,10 @@ cargo test --lib platform::tests::native_surface_initializes_resizes_presents_an
 Для него необходимы работающая оконная сессия и графический адаптер с поддержкой
 показа кадра в окне. По умолчанию этот тест помечен `ignore` для CI без дисплея.
 
-Отдельный тест без окна проверяет на GPU отрисовку всех частей составного меша
-для двух объектов и считывает результат из текстуры:
+Отдельные тесты без окна считывают результат из GPU-текстуры: один проверяет
+все части составного меша у двух объектов, другой — перспективу и перекрытие
+треугольников с помощью depth buffer:
 
 ```bash
-cargo test --lib backend::wgpu::surface::tests::shared_composite_mesh_draws_every_part_at_each_transform -- --ignored --exact --nocapture
+cargo test --lib backend::wgpu::surface::tests:: -- --ignored --nocapture
 ```

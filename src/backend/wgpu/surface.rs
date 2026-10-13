@@ -309,6 +309,10 @@ mod tests {
     use super::super::buffer::GpuMesh;
     use super::*;
 
+    const TEST_WIDTH: u32 = 64;
+    const TEST_HEIGHT: u32 = 64;
+    const TEST_BYTES_PER_ROW: u32 = TEST_WIDTH * 4;
+
     #[test]
     fn minimized_surface_is_not_drawable() {
         assert!(!is_drawable(WindowSize::new(0, 600)));
@@ -336,38 +340,12 @@ mod tests {
     #[ignore = "requires a GPU adapter"]
     fn shared_composite_mesh_draws_every_part_at_each_transform()
     -> Result<(), Box<dyn std::error::Error>> {
-        const WIDTH: u32 = 64;
-        const HEIGHT: u32 = 64;
-        const BYTES_PER_ROW: u32 = WIDTH * 4;
-
         let instance = wgpu::Instance::default();
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
         let pipeline = MeshPipeline::new(&device, wgpu::TextureFormat::Rgba8Unorm)?;
-        let color_target = device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d {
-                width: WIDTH,
-                height: HEIGHT,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        let color_view = color_target.create_view(&wgpu::TextureViewDescriptor::default());
-        let depth = DepthTexture::new(&device, WindowSize::new(WIDTH, HEIGHT))?;
-        let readback = device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: u64::from(BYTES_PER_ROW) * u64::from(HEIGHT),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
 
         let part = |x: f32| SubMesh {
             vertices: [
@@ -413,7 +391,110 @@ mod tests {
             }
         );
 
-        let submission = checked_gpu_operation(&device, || {
+        let pixels = render_offscreen(&device, &queue, &pipeline, &camera, &draws)?;
+        for x in [11, 27, 37, 53] {
+            assert_eq!(pixel(&pixels, x, 32), &[255, 0, 0]);
+        }
+        assert_eq!(pixel(&pixels, 32, 32), &[0, 0, 0]);
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "requires a GPU adapter"]
+    fn perspective_and_depth_keep_the_nearer_triangle_visible()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let instance = wgpu::Instance::default();
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))?;
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))?;
+        let pipeline = MeshPipeline::new(&device, wgpu::TextureFormat::Rgba8Unorm)?;
+        let triangle = SubMesh {
+            vertices: [
+                Vec3::new(-0.8, -0.8, 0.0),
+                Vec3::new(0.8, -0.8, 0.0),
+                Vec3::new(0.0, 0.8, 0.0),
+            ]
+            .map(|position| Vertex { position })
+            .to_vec(),
+            indices: vec![0, 1, 2],
+        };
+        let mut resources = ResourceManager::new();
+        let near_handle = resources.add_mesh(Mesh {
+            submeshes: vec![triangle.clone()],
+            color: [1.0, 0.0, 0.0, 1.0],
+        });
+        let far_handle = resources.add_mesh(Mesh {
+            submeshes: vec![triangle],
+            color: [0.0, 1.0, 0.0, 1.0],
+        });
+        let near_mesh = GpuMesh::upload(&device, &resources, near_handle)?;
+        let far_mesh = GpuMesh::upload(&device, &resources, far_handle)?;
+        let camera = pipeline.bind_camera(
+            &device,
+            &RenderCamera {
+                view: Mat4::IDENTITY,
+                projection: crate::math::perspective(90.0_f32.to_radians(), 1.0),
+            },
+        )?;
+        let near_item = RenderItem {
+            world_transform: Mat4::from_translation(Vec3::new(0.0, 0.0, -1.0)),
+            mesh: near_handle,
+        };
+        let far_item = RenderItem {
+            world_transform: Mat4::from_translation(Vec3::new(0.8, 0.0, -2.0)),
+            mesh: far_handle,
+        };
+        let draws = [
+            MeshDraw {
+                mesh: &near_mesh,
+                uniform: pipeline.bind_mesh(&device, &near_item, near_mesh.color)?,
+            },
+            MeshDraw {
+                mesh: &far_mesh,
+                uniform: pipeline.bind_mesh(&device, &far_item, far_mesh.color)?,
+            },
+        ];
+
+        let pixels = render_offscreen(&device, &queue, &pipeline, &camera, &draws)?;
+        assert_eq!(pixel(&pixels, 22, 32), &[255, 0, 0]);
+        assert_eq!(pixel(&pixels, 40, 32), &[255, 0, 0]);
+        assert_eq!(pixel(&pixels, 49, 32), &[0, 255, 0]);
+        assert_eq!(pixel(&pixels, 53, 32), &[0, 0, 0]);
+        Ok(())
+    }
+
+    fn render_offscreen(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        pipeline: &MeshPipeline,
+        camera: &UniformBinding,
+        draws: &[MeshDraw<'_>],
+    ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+        let color_target = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d {
+                width: TEST_WIDTH,
+                height: TEST_HEIGHT,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let color_view = color_target.create_view(&wgpu::TextureViewDescriptor::default());
+        let depth = DepthTexture::new(device, WindowSize::new(TEST_WIDTH, TEST_HEIGHT))?;
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: u64::from(TEST_BYTES_PER_ROW) * u64::from(TEST_HEIGHT),
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
+        let submission = checked_gpu_operation(device, || {
             let mut encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
             {
@@ -437,7 +518,7 @@ mod tests {
                     }),
                     ..Default::default()
                 });
-                encode_mesh_draws(&mut pass, &pipeline, &camera, &draws);
+                encode_mesh_draws(&mut pass, pipeline, camera, draws);
             }
             encoder.copy_texture_to_buffer(
                 wgpu::TexelCopyTextureInfo {
@@ -450,8 +531,8 @@ mod tests {
                     buffer: &readback,
                     layout: wgpu::TexelCopyBufferLayout {
                         offset: 0,
-                        bytes_per_row: Some(BYTES_PER_ROW),
-                        rows_per_image: Some(HEIGHT),
+                        bytes_per_row: Some(TEST_BYTES_PER_ROW),
+                        rows_per_image: Some(TEST_HEIGHT),
                     },
                 },
                 color_target.size(),
@@ -468,18 +549,16 @@ mod tests {
         })?;
         receiver.recv_timeout(Duration::from_secs(5))??;
         let pixels = readback.get_mapped_range(..)?;
-        let pixel = |x: usize| -> &[u8] {
-            let start = (32 * WIDTH as usize + x) * 4;
-            pixels
-                .get(start..start + 3)
-                .expect("sample coordinates fit the readback buffer")
-        };
-        for x in [11, 27, 37, 53] {
-            assert_eq!(pixel(x), &[255, 0, 0]);
-        }
-        assert_eq!(pixel(32), &[0, 0, 0]);
+        let result = pixels.to_vec();
         drop(pixels);
         readback.unmap();
-        Ok(())
+        Ok(result)
+    }
+
+    fn pixel(pixels: &[u8], x: usize, y: usize) -> &[u8] {
+        let start = (y * TEST_WIDTH as usize + x) * 4;
+        pixels
+            .get(start..start + 3)
+            .expect("sample coordinates fit the readback buffer")
     }
 }
