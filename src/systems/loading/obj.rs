@@ -1,14 +1,14 @@
 use std::cell::RefCell;
 use std::path::Path;
 
-use super::{DEFAULT_MODEL_COLOR, ModelLoadError, parse_error, read_file};
+use super::{DEFAULT_MODEL_COLOR, LoadResult, parse_error, read_file};
 
 use crate::math::Vec3;
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 
 const POLYGON_TOLERANCE: f32 = 1e-5;
 
-pub(super) fn load(path: &Path) -> Result<Mesh, ModelLoadError> {
+pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
     let bytes = read_file(path)?;
     let material_error = RefCell::new(None);
     let parsed = tobj::load_obj_buf(
@@ -86,42 +86,42 @@ fn triangulate(
     indices: Vec<u32>,
     arities: &[u32],
     vertices: &[Vertex],
-) -> Result<Vec<u32>, ModelLoadError> {
+) -> LoadResult<Vec<u32>> {
     if arities.is_empty() {
-        Ok(indices)
+        return Ok(indices);
+    }
+
+    let mut remaining = indices.as_slice();
+    let mut triangles = Vec::new();
+    for &arity in arities {
+        let count = arity as usize;
+        let face = remaining
+            .get(..count)
+            .ok_or_else(|| parse_error(path, "OBJ face exceeds its index buffer"))?;
+        if count < 3 {
+            return Err(parse_error(path, "OBJ points and lines are unsupported"));
+        }
+        if count > 3 {
+            validate_polygon(path, face, vertices)?;
+        }
+        triangles.extend(
+            face[1..]
+                .windows(2)
+                .flat_map(|edge| [face[0], edge[0], edge[1]]),
+        );
+        remaining = &remaining[count..];
+    }
+    if remaining.is_empty() {
+        Ok(triangles)
     } else {
-        let mut remaining = indices.as_slice();
-        let mut triangles = Vec::new();
-        for &arity in arities {
-            let count = arity as usize;
-            let face = remaining
-                .get(..count)
-                .ok_or_else(|| parse_error(path, "OBJ face exceeds its index buffer"))?;
-            if count < 3 {
-                return Err(parse_error(path, "OBJ points and lines are unsupported"));
-            }
-            if count > 3 {
-                validate_polygon(path, face, vertices)?;
-            }
-            triangles.extend(
-                face[1..]
-                    .windows(2)
-                    .flat_map(|edge| [face[0], edge[0], edge[1]]),
-            );
-            remaining = &remaining[count..];
-        }
-        if remaining.is_empty() {
-            Ok(triangles)
-        } else {
-            Err(parse_error(
-                path,
-                "OBJ face sizes do not match the index buffer",
-            ))
-        }
+        Err(parse_error(
+            path,
+            "OBJ face sizes do not match the index buffer",
+        ))
     }
 }
 
-fn validate_polygon(path: &Path, face: &[u32], vertices: &[Vertex]) -> Result<(), ModelLoadError> {
+fn validate_polygon(path: &Path, face: &[u32], vertices: &[Vertex]) -> LoadResult<()> {
     let positions = face
         .iter()
         .map(|&index| vertices[index as usize].position)

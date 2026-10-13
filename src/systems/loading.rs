@@ -16,6 +16,8 @@ const GLB_EXTENSION: &str = "glb";
 const OBJ_EXTENSION: &str = "obj";
 const DEFAULT_MODEL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
+type LoadResult<T> = std::result::Result<T, ModelLoadError>;
+
 /// Model loading error.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -72,7 +74,7 @@ pub fn load_model(
     }
 }
 
-fn read_mesh(path: &Path) -> Result<Mesh, ModelLoadError> {
+fn read_mesh(path: &Path) -> LoadResult<Mesh> {
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -87,7 +89,7 @@ fn read_mesh(path: &Path) -> Result<Mesh, ModelLoadError> {
     Ok(mesh)
 }
 
-fn read_file(path: &Path) -> Result<Vec<u8>, ModelLoadError> {
+fn read_file(path: &Path) -> LoadResult<Vec<u8>> {
     std::fs::read(path).map_err(|source| ModelLoadError::Io {
         path: path.to_owned(),
         source,
@@ -101,7 +103,7 @@ fn parse_error(path: &Path, message: impl ToString) -> ModelLoadError {
     }
 }
 
-fn validate_mesh(path: &Path, mesh: &Mesh) -> Result<(), ModelLoadError> {
+fn validate_mesh(path: &Path, mesh: &Mesh) -> LoadResult<()> {
     if mesh.submeshes.is_empty() {
         return Err(parse_error(path, "model contains no triangle geometry"));
     }
