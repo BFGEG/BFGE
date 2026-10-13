@@ -57,12 +57,12 @@ impl SavedNode {
     }
 
     fn into_node(self) -> SceneNode {
-        SceneNode::from_parts(
-            self.parent,
-            self.children,
-            self.objects,
-            self.local_transform,
-        )
+        SceneNode {
+            parent: self.parent,
+            children: self.children,
+            objects: self.objects,
+            local_transform: self.local_transform,
+        }
     }
 }
 
