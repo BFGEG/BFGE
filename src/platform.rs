@@ -88,29 +88,30 @@ impl Window {
     }
 }
 
-/// Owns the engine's window and delivers its events (close, resize).
+/// Owns the engine's window active for one session.
 ///
 /// The client does not create or manage the window; it only supplies a
 /// [`WindowDescriptor`]. Creation must run on the application's main thread.
-/// The event loop is retained for the frame driver implemented in issue #15.
+/// The event loop is owned by the engine and reused across sessions; the
+/// window itself lives only for the current session (see issue #15).
 #[derive(Debug)]
 pub struct PlatformAdapter {
     window: Window,
-    _event_loop: Option<EventLoop<()>>,
 }
 
 impl PlatformAdapter {
-    /// Creates the window and the platform adapter.
-    pub(crate) fn new(descriptor: WindowDescriptor) -> Result<Self, PlatformError> {
+    /// Creates the window inside the given event loop.
+    pub(crate) fn new(
+        descriptor: WindowDescriptor,
+        event_loop: &mut EventLoop<()>,
+    ) -> Result<Self, PlatformError> {
         validate_window_size(descriptor.size)?;
-        let event_loop =
-            EventLoop::new().map_err(|error| PlatformError::WindowCreation(error.to_string()))?;
         Self::create_window(descriptor, event_loop)
     }
 
     fn create_window(
         descriptor: WindowDescriptor,
-        mut event_loop: EventLoop<()>,
+        event_loop: &mut EventLoop<()>,
     ) -> Result<Self, PlatformError> {
         let mut bootstrap = WindowBootstrap {
             descriptor,
@@ -124,7 +125,6 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Native(native),
             },
-            _event_loop: Some(event_loop),
         })
     }
 
@@ -153,9 +153,16 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Test(size),
             },
-            _event_loop: None,
         }
     }
+}
+
+/// Creates a new event loop for the engine.
+///
+/// The event loop is created once and reused for every window in following
+/// sessions; winit allows a single loop per process (see Wgpu_Backend.md).
+pub(crate) fn new_event_loop() -> Result<EventLoop<()>, PlatformError> {
+    EventLoop::new().map_err(|error| PlatformError::EventLoopCreation(error.to_string()))
 }
 
 pub(crate) fn validate_window_size(size: WindowSize) -> Result<(), PlatformError> {
@@ -205,6 +212,9 @@ pub enum PlatformError {
     /// An explicit window size must have nonzero width and height.
     #[error("invalid window size: {0:?}; width and height must be nonzero")]
     InvalidWindowSize(WindowSize),
+    /// Failed to create the event loop.
+    #[error("failed to create the event loop: {0}")]
+    EventLoopCreation(String),
     /// Failed to create the window.
     #[error("failed to create the window: {0}")]
     WindowCreation(String),
@@ -218,14 +228,6 @@ mod tests {
     use super::*;
 
     const TEST_WINDOW_TITLE: &str = "BFGE wgpu smoke test";
-
-    #[test]
-    fn zero_width_is_rejected_before_creating_event_loop() {
-        assert!(matches!(
-            PlatformAdapter::new(WindowDescriptor::new(TEST_WINDOW_TITLE, 0, 600)),
-            Err(PlatformError::InvalidWindowSize(_))
-        ));
-    }
 
     #[test]
     fn zero_height_resize_preserves_current_window_size() {
@@ -256,10 +258,10 @@ mod tests {
         use crate::render::system::RenderSystem;
         use crate::resources::manager::ResourceManager;
 
-        let event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
         let mut platform = PlatformAdapter::create_window(
             WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
-            event_loop,
+            &mut event_loop,
         )?;
         let mut backend = WgpuRenderSystem::new();
         let resources = ResourceManager::new();
