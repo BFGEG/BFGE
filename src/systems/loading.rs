@@ -49,6 +49,12 @@ pub enum ModelLoadError {
 
 /// Loads a model (glTF 2.0 / OBJ) and creates a scene object for it.
 ///
+/// `path` selects the loader by extension; `parent` must exist in `scene`.
+/// All parts become one mesh registered in `resources` and one attached object.
+/// Each successful call returns a new object ID, even for the same file.
+/// The first explicit color on used geometry applies to the entire mesh;
+/// the fallback is neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
+///
 /// # Errors
 ///
 /// Returns [`ModelLoadError`] for an unknown parent, unsupported format,

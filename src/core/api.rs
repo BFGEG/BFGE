@@ -48,6 +48,15 @@ pub trait EngineApi {
     ///
     /// The object is immediately linked to the given node. Every call creates
     /// a new object, including repeated loads of the same file.
+    /// Supports `.gltf`, `.glb` and `.obj`; parts share the first explicit color
+    /// on used geometry, or neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
+    /// Textures and lighting are ignored. This operation requires no window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ModelLoadError`] for an unknown parent, unsupported format or
+    /// geometry, unreadable model/buffer/material file, or corrupted data.
+    /// A failed load leaves the scene and resources unchanged.
     fn load_model(
         &mut self,
         path: &Path,
