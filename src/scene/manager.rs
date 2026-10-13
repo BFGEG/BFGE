@@ -1,8 +1,8 @@
 //! Scene storage and management.
 
-use crate::math;
+use crate::math::{self, Mat4};
 use crate::platform::WindowSize;
-use crate::render::frame::{RenderCamera, RenderFrame};
+use crate::render::frame::{RenderCamera, RenderFrame, RenderItem};
 use crate::resources::handle::MeshHandle;
 use crate::scene::api::SceneApi;
 use crate::scene::error::SceneError;
@@ -56,9 +56,9 @@ impl SceneManager {
 
     /// Builds a frame from the current scene state.
     ///
-    /// The camera comes from the viewpoint and the window size. Object
-    /// collection and world transforms are added in the next milestone, so
-    /// `items` is currently empty.
+    /// The camera comes from the viewpoint and the window size. The scene tree
+    /// is traversed from the root, accumulating world transforms, and every
+    /// attached object becomes a [`RenderItem`].
     #[allow(dead_code)] // called by [CORE] (milestone 2)
     pub(crate) fn build_render_frame(&self, size: WindowSize) -> RenderFrame {
         let aspect_ratio = if size.height == 0 {
@@ -67,12 +67,38 @@ impl SceneManager {
             size.width as f32 / size.height as f32
         };
 
+        let mut items = Vec::new();
+        self.collect_items(self.root, Mat4::IDENTITY, &mut items);
+
         RenderFrame {
             camera: RenderCamera {
                 view: math::view(self.viewpoint.position, self.viewpoint.direction),
                 projection: math::perspective(self.viewpoint.fov_y, aspect_ratio),
             },
-            items: Vec::new(),
+            items,
+        }
+    }
+
+    /// Appends a render item for each object in the subtree rooted at `node`,
+    /// composing `world = parent_world * local_transform` down the tree.
+    fn collect_items(&self, node: SceneNodeId, parent_world: Mat4, items: &mut Vec<RenderItem>) {
+        let Some(current) = self.nodes.get(node.0 as usize) else {
+            return;
+        };
+
+        let world = parent_world * current.local_transform.matrix();
+
+        for object in &current.objects {
+            if let Some(object) = self.objects.get(object.0 as usize) {
+                items.push(RenderItem {
+                    world_transform: world,
+                    mesh: object.mesh,
+                });
+            }
+        }
+
+        for child in &current.children {
+            self.collect_items(*child, world, items);
         }
     }
 
@@ -113,24 +139,49 @@ impl SceneApi for SceneManager {
         self.root
     }
 
-    fn create_node(&mut self, _parent: SceneNodeId) -> Result<SceneNodeId, SceneError> {
-        todo!("milestone 2")
+    fn create_node(&mut self, parent: SceneNodeId) -> Result<SceneNodeId, SceneError> {
+        if parent.0 as usize >= self.nodes.len() {
+            return Err(SceneError::UnknownNode(parent));
+        }
+
+        let id = SceneNodeId(self.nodes.len() as u32);
+        self.nodes.push(SceneNode::new(Some(parent)));
+        self.nodes[parent.0 as usize].children.push(id);
+
+        Ok(id)
     }
 
     fn set_node_transform(
         &mut self,
-        _node: SceneNodeId,
-        _transform: Transform,
+        node: SceneNodeId,
+        transform: Transform,
     ) -> Result<(), SceneError> {
-        todo!("milestone 2")
+        let Some(target) = self.nodes.get_mut(node.0 as usize) else {
+            return Err(SceneError::UnknownNode(node));
+        };
+
+        target.local_transform = transform;
+        Ok(())
     }
 
     fn reparent_object(
         &mut self,
-        _object: SceneObjectId,
-        _new_parent: SceneNodeId,
+        object: SceneObjectId,
+        new_parent: SceneNodeId,
     ) -> Result<(), SceneError> {
-        todo!("milestone 2")
+        if self.objects.get(object.0 as usize).is_none() {
+            return Err(SceneError::UnknownObject(object));
+        }
+        if new_parent.0 as usize >= self.nodes.len() {
+            return Err(SceneError::UnknownNode(new_parent));
+        }
+
+        for node in &mut self.nodes {
+            node.objects.retain(|candidate| *candidate != object);
+        }
+        self.nodes[new_parent.0 as usize].objects.push(object);
+
+        Ok(())
     }
 
     fn viewpoint(&self) -> ViewpointState {
@@ -144,70 +195,4 @@ impl SceneApi for SceneManager {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::math::Vec3;
-    use crate::resources::library::BuiltinMesh;
-    use crate::resources::manager::ResourceManager;
-    use crate::scene::api::SceneApi;
-
-    const EPSILON: f32 = 1e-5;
-    const WINDOW: WindowSize = WindowSize {
-        width: 800,
-        height: 600,
-    };
-
-    #[test]
-    fn frame_camera_is_placed_at_the_viewpoint() {
-        let mut scene = SceneManager::new();
-        let position = Vec3::new(1.0, 2.0, 3.0);
-        let viewpoint = ViewpointState {
-            position,
-            direction: Vec3::new(0.0, 0.0, -1.0),
-            fov_y: 60.0_f32.to_radians(),
-        };
-        scene
-            .set_viewpoint(viewpoint)
-            .expect("the scene accepts a valid viewpoint");
-
-        let frame = scene.build_render_frame(WINDOW);
-
-        let origin = frame.camera.view.transform_point3(position);
-        assert!(origin.abs_diff_eq(Vec3::ZERO, EPSILON));
-    }
-
-    #[test]
-    fn zero_height_window_produces_finite_projection() {
-        let scene = SceneManager::new();
-
-        let frame = scene.build_render_frame(WindowSize::new(800, 0));
-
-        assert!(frame.camera.projection.is_finite());
-    }
-
-    #[test]
-    fn create_object_attaches_to_the_root() {
-        let mut resources = ResourceManager::new();
-        let mesh = resources.builtin(BuiltinMesh::Cube);
-        let mut scene = SceneManager::new();
-        let root = scene.root_node();
-
-        let id = scene
-            .create_object(mesh, root)
-            .expect("the root node exists");
-
-        assert_eq!(scene.objects().len(), 1);
-        assert_eq!(scene.nodes()[0].objects, vec![id]);
-    }
-
-    #[test]
-    fn create_object_with_unknown_parent_fails() {
-        let mut resources = ResourceManager::new();
-        let mesh = resources.builtin(BuiltinMesh::Cube);
-        let mut scene = SceneManager::new();
-
-        let result = scene.create_object(mesh, SceneNodeId(99));
-
-        assert!(matches!(result, Err(SceneError::UnknownNode(_))));
-    }
-}
+mod tests;

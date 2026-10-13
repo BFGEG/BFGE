@@ -7,10 +7,10 @@ use gltf::mesh::Mode;
 use percent_encoding::percent_decode_str;
 use serde::Deserialize;
 
+use super::{DEFAULT_MODEL_COLOR, LoadResult, parse_error, read_file};
+
 use crate::math::{Mat4, Vec3};
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
-
-use super::{DEFAULT_MODEL_COLOR, ModelLoadError, parse_error, read_file};
 
 const DATA_URI_PREFIX: &str = "data:";
 const BASE64_SUFFIX: &str = ";base64";
@@ -36,7 +36,7 @@ struct PbrColor {
     color: Option<[f32; 4]>,
 }
 
-pub(super) fn load(path: &Path) -> Result<Mesh, ModelLoadError> {
+pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
     let file = read_file(path)?;
     let model = gltf::Gltf::from_slice(&file).map_err(|error| parse_error(path, error))?;
     let colors: MaterialColors = if file.starts_with(GLB_MAGIC) {
@@ -116,11 +116,7 @@ pub(super) fn load(path: &Path) -> Result<Mesh, ModelLoadError> {
     })
 }
 
-fn load_buffer(
-    path: &Path,
-    buffer: &gltf::Buffer<'_>,
-    blob: Option<&[u8]>,
-) -> Result<Vec<u8>, ModelLoadError> {
+fn load_buffer(path: &Path, buffer: &gltf::Buffer<'_>, blob: Option<&[u8]>) -> LoadResult<Vec<u8>> {
     let data = match buffer.source() {
         Source::Bin => blob
             .ok_or_else(|| parse_error(path, "GLB is missing its binary buffer"))?
@@ -179,7 +175,7 @@ fn load_primitive(
     buffers: &mut [Option<Vec<u8>>],
     blob: Option<&[u8]>,
     transform: Mat4,
-) -> Result<SubMesh, ModelLoadError> {
+) -> LoadResult<SubMesh> {
     if primitive.mode() != Mode::Triangles || primitive.morph_targets().next().is_some() {
         return Err(parse_error(
             path,
@@ -241,7 +237,7 @@ fn validate_accessor(
     accessor: &gltf::Accessor<'_>,
     buffers: &mut [Option<Vec<u8>>],
     blob: Option<&[u8]>,
-) -> Result<(), ModelLoadError> {
+) -> LoadResult<()> {
     if accessor.sparse().is_some() {
         return Err(parse_error(path, "sparse glTF accessors are unsupported"));
     }
