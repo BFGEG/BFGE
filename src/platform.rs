@@ -215,6 +215,9 @@ pub enum PlatformError {
     /// Failed to create the event loop.
     #[error("failed to create the event loop: {0}")]
     EventLoopCreation(String),
+    /// No event loop is available for window creation.
+    #[error("no event loop available for window creation")]
+    MissingEventLoop,
     /// Failed to create the window.
     #[error("failed to create the window: {0}")]
     WindowCreation(String),

@@ -18,8 +18,6 @@ use crate::systems::lifecycle::{self, EngineParts};
 use crate::systems::loading::{self, ModelLoadError};
 use crate::systems::persistence::{self, ScenePersistenceError};
 
-const EVENT_LOOP_UNAVAILABLE: &str = "the engine has no event loop to create a window in";
-
 /// Engine facade and orchestrator: links the scene, resources, systems,
 /// renderer, window and the frame lifecycle.
 ///
@@ -65,9 +63,7 @@ impl Engine {
         }
         match &mut self.winit_loop {
             Some(event_loop) => Ok(event_loop),
-            None => Err(EngineError::Platform(PlatformError::EventLoopCreation(
-                EVENT_LOOP_UNAVAILABLE.to_owned(),
-            ))),
+            None => Err(EngineError::Platform(PlatformError::MissingEventLoop)),
         }
     }
 
