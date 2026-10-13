@@ -9,9 +9,11 @@ use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::scene::manager::SceneManager;
 
 mod gltf;
+mod obj;
 
 const GLTF_EXTENSION: &str = "gltf";
 const GLB_EXTENSION: &str = "glb";
+const OBJ_EXTENSION: &str = "obj";
 const DEFAULT_MODEL_COLOR: [f32; 4] = [0.8, 0.8, 0.8, 1.0];
 
 type LoadResult<T> = std::result::Result<T, ModelLoadError>;
@@ -74,6 +76,7 @@ fn read_mesh(path: &Path) -> LoadResult<Mesh> {
         .to_ascii_lowercase();
     let mesh = match extension.as_str() {
         GLTF_EXTENSION | GLB_EXTENSION => gltf::load(path)?,
+        OBJ_EXTENSION => obj::load(path)?,
         _ => return Err(ModelLoadError::UnsupportedFormat(extension)),
     };
     validate_mesh(path, &mesh)?;

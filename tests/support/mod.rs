@@ -8,6 +8,15 @@ pub const GLTF_FILE: &str = "model.gltf";
 pub const GLB_FILE: &str = "model.glb";
 pub const BUFFER_FILE: &str = "geometry data.bin";
 pub const BUFFER_URI: &str = "geometry%20data.bin";
+pub const OBJ_FILE: &str = "model.obj";
+pub const MTL_FILE: &str = "colors.mtl";
+pub const OBJ_TRIANGLE: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+
+pub fn write_obj(directory: &Path, text: &str) -> PathBuf {
+    let path = directory.join(OBJ_FILE);
+    std::fs::write(&path, text).expect("the fixture directory is writable");
+    path
+}
 
 pub fn directory() -> TempDir {
     let parent = Path::new(env!("CARGO_MANIFEST_DIR")).join("target/model-tests");
