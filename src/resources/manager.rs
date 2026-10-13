@@ -17,6 +17,7 @@ impl ResourceManager {
         Self::default()
     }
 
+    #[allow(dead_code)] // used by [SYS]/[tests]
     pub(crate) fn add_mesh(&mut self, mesh: Mesh) -> MeshHandle {
         let index = self.meshes.len() as u32;
         self.meshes.push(mesh);
@@ -24,7 +25,7 @@ impl ResourceManager {
     }
 
     /// Returns the handle of a built-in `shape`, registering it on first use.
-    #[allow(dead_code)] // called by [SYS]
+    #[allow(dead_code)] // used by [SYS]/[tests]
     pub(crate) fn builtin(&mut self, shape: BuiltinMesh) -> MeshHandle {
         if let Some(handle) = self.library.handle(shape) {
             handle
@@ -40,14 +41,13 @@ impl ResourceManager {
         self.meshes.get(handle.index() as usize)
     }
 
-    #[allow(dead_code)] // read by [SYS]
     pub(crate) fn meshes(&self) -> &[Mesh] {
         &self.meshes
     }
 
-    #[allow(dead_code)] // used by [SYS]
     pub(crate) fn restore_meshes(&mut self, meshes: Vec<Mesh>) {
         self.meshes = meshes;
+        self.library = MeshLibrary::default();
     }
 }
 

@@ -103,19 +103,16 @@ impl SceneManager {
     }
 
     /// Returns all scene nodes.
-    #[allow(dead_code)] // read by [SYS]
     pub(crate) fn nodes(&self) -> &[SceneNode] {
         &self.nodes
     }
 
     /// Returns all scene objects.
-    #[allow(dead_code)] // read by [SYS]
     pub(crate) fn objects(&self) -> &[SceneObject] {
         &self.objects
     }
 
     /// Restores nodes, objects and the viewpoint.
-    #[allow(dead_code)] // called by [SYS]
     pub(crate) fn restore(
         &mut self,
         nodes: Vec<SceneNode>,

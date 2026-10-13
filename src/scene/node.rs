@@ -24,4 +24,19 @@ impl SceneNode {
             local_transform: Transform::default(),
         }
     }
+
+    /// Rebuilds a node from parts of a saved scene.
+    pub(crate) fn from_parts(
+        parent: Option<SceneNodeId>,
+        children: Vec<SceneNodeId>,
+        objects: Vec<SceneObjectId>,
+        local_transform: Transform,
+    ) -> Self {
+        Self {
+            parent,
+            children,
+            objects,
+            local_transform,
+        }
+    }
 }
