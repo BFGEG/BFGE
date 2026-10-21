@@ -8,7 +8,12 @@ use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::platform::pump_events::EventLoopExtPumpEvents;
+#[cfg(test)]
+use winit::window::Fullscreen;
 use winit::window::{Window as NativeWindow, WindowId};
+
+/// Module-wide `Result` with [`PlatformError`] as the error type.
+type Result<T> = core::result::Result<T, PlatformError>;
 
 const WINDOW_NOT_RESUMED: &str = "the window event loop did not resume during initialization";
 #[cfg(test)]
@@ -66,7 +71,7 @@ enum WindowInner {
 }
 
 impl Window {
-    pub(crate) fn native(&self) -> Result<Arc<NativeWindow>, PlatformError> {
+    pub(crate) fn native(&self) -> Result<Arc<NativeWindow>> {
         match &self.inner {
             WindowInner::Native(window) => Ok(Arc::clone(window)),
             #[cfg(test)]
@@ -88,41 +93,28 @@ impl Window {
     }
 }
 
-/// Platform-level window event delivered by pumping the event loop.
-///
-/// Crate-private: `core` maps these onto its internal loop events.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PlatformEvent {
-    /// The window was resized.
-    Resized(WindowSize),
-    /// The user requested the window to close.
-    CloseRequested,
-}
-
-/// Owns the engine's window and delivers its events (close, resize).
+/// Owns the engine's window active for one session.
 ///
 /// The client does not create or manage the window; it only supplies a
 /// [`WindowDescriptor`]. Creation must run on the application's main thread.
-/// The event loop is pumped by the frame driver to deliver window events.
+/// The event loop is owned by the engine and reused across sessions; the
+/// window itself lives only for the current session (see issue #15).
 #[derive(Debug)]
 pub struct PlatformAdapter {
     window: Window,
-    event_loop: Option<EventLoop<()>>,
 }
 
 impl PlatformAdapter {
-    /// Creates the window and the platform adapter.
-    pub(crate) fn new(descriptor: WindowDescriptor) -> Result<Self, PlatformError> {
+    /// Creates the window inside the given event loop.
+    pub(crate) fn new(
+        descriptor: WindowDescriptor,
+        event_loop: &mut EventLoop<()>,
+    ) -> Result<Self> {
         validate_window_size(descriptor.size)?;
-        let event_loop =
-            EventLoop::new().map_err(|error| PlatformError::WindowCreation(error.to_string()))?;
         Self::create_window(descriptor, event_loop)
     }
 
-    fn create_window(
-        descriptor: WindowDescriptor,
-        mut event_loop: EventLoop<()>,
-    ) -> Result<Self, PlatformError> {
+    fn create_window(descriptor: WindowDescriptor, event_loop: &mut EventLoop<()>) -> Result<Self> {
         let mut bootstrap = WindowBootstrap {
             descriptor,
             result: None,
@@ -135,7 +127,6 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Native(native),
             },
-            event_loop: Some(event_loop),
         })
     }
 
@@ -144,17 +135,8 @@ impl PlatformAdapter {
         &self.window
     }
 
-    /// Pumps queued window events and returns them.
-    pub(crate) fn pump_events(&mut self) -> Vec<PlatformEvent> {
-        let mut pump = EventPump { events: Vec::new() };
-        if let Some(event_loop) = &mut self.event_loop {
-            event_loop.pump_app_events(Some(Duration::ZERO), &mut pump);
-        }
-        pump.events
-    }
-
     /// Resizes the window.
-    pub(crate) fn set_window_size(&mut self, size: WindowSize) -> Result<(), PlatformError> {
+    pub(crate) fn set_window_size(&mut self, size: WindowSize) -> Result<()> {
         validate_window_size(size)?;
         match &mut self.window.inner {
             WindowInner::Native(window) => {
@@ -173,12 +155,94 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Test(size),
             },
-            event_loop: None,
+        }
+    }
+
+    pub(crate) fn pump_events(
+        &self,
+        event_loop: &mut EventLoop<()>,
+        timeout: Option<Duration>,
+    ) -> Vec<PlatformEvent> {
+        let mut recorder = EventRecorder {
+            window_id: match &self.window.inner {
+                WindowInner::Native(window) => Some(window.id()),
+                #[cfg(test)]
+                WindowInner::Test(_) => None,
+            },
+            events: Vec::new(),
+        };
+        event_loop.pump_app_events(timeout, &mut recorder);
+        recorder.events
+    }
+
+    /// Toggles borderless fullscreen on the current monitor.
+    ///
+    /// Test-only: lets an interactive smoke test fill the screen. Uses a
+    /// borderless mode (no video-mode switch), which is the least intrusive and
+    /// works across X11/Wayland/Windows.
+    #[cfg(test)]
+    pub(crate) fn set_fullscreen(&self, fullscreen: bool) {
+        match &self.window.inner {
+            WindowInner::Native(window) => {
+                let mode = fullscreen.then(|| Fullscreen::Borderless(None));
+                window.set_fullscreen(mode);
+            }
+            #[cfg(test)]
+            WindowInner::Test(_) => {}
         }
     }
 }
 
-pub(crate) fn validate_window_size(size: WindowSize) -> Result<(), PlatformError> {
+/// A window event delivered to the engine loop.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlatformEvent {
+    /// The window's close button was pressed (or close was requested).
+    CloseRequested,
+    /// The window was resized to the given size.
+    Resized(WindowSize),
+}
+
+struct EventRecorder {
+    window_id: Option<WindowId>,
+    events: Vec<PlatformEvent>,
+}
+
+impl EventRecorder {
+    fn record(&mut self, window_id: WindowId, event: WindowEvent) {
+        if self.window_id == Some(window_id) {
+            match event {
+                WindowEvent::CloseRequested => self.events.push(PlatformEvent::CloseRequested),
+                WindowEvent::Resized(size) => self.events.push(PlatformEvent::Resized(
+                    WindowSize::new(size.width, size.height),
+                )),
+                _ => {}
+            }
+        }
+    }
+}
+
+impl ApplicationHandler for EventRecorder {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        self.record(window_id, event);
+    }
+}
+
+/// Creates a new event loop for the engine.
+///
+/// The event loop is created once and reused for every window in following
+/// sessions; winit allows a single loop per process (see Wgpu_Backend.md).
+pub(crate) fn new_event_loop() -> Result<EventLoop<()>> {
+    EventLoop::new().map_err(|error| PlatformError::EventLoopCreation(error.to_string()))
+}
+
+pub(crate) fn validate_window_size(size: WindowSize) -> Result<()> {
     if size.width == 0 || size.height == 0 {
         Err(PlatformError::InvalidWindowSize(size))
     } else {
@@ -188,8 +252,9 @@ pub(crate) fn validate_window_size(size: WindowSize) -> Result<(), PlatformError
 
 struct WindowBootstrap {
     descriptor: WindowDescriptor,
-    result: Option<Result<Arc<NativeWindow>, PlatformError>>,
+    result: Option<Result<Arc<NativeWindow>>>,
 }
+
 impl ApplicationHandler for WindowBootstrap {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.result.is_none() {
@@ -217,32 +282,6 @@ impl ApplicationHandler for WindowBootstrap {
     }
 }
 
-struct EventPump {
-    events: Vec<PlatformEvent>,
-}
-
-impl ApplicationHandler for EventPump {
-    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
-
-    fn window_event(
-        &mut self,
-        _event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
-        event: WindowEvent,
-    ) {
-        match event {
-            WindowEvent::CloseRequested => self.events.push(PlatformEvent::CloseRequested),
-            WindowEvent::Resized(size) => {
-                self.events.push(PlatformEvent::Resized(WindowSize::new(
-                    size.width,
-                    size.height,
-                )));
-            }
-            _ => {}
-        }
-    }
-}
-
 /// Platform (window) error.
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -250,6 +289,12 @@ pub enum PlatformError {
     /// An explicit window size must have nonzero width and height.
     #[error("invalid window size: {0:?}; width and height must be nonzero")]
     InvalidWindowSize(WindowSize),
+    /// Failed to create the event loop.
+    #[error("failed to create the event loop: {0}")]
+    EventLoopCreation(String),
+    /// No event loop is available for window creation.
+    #[error("no event loop available for window creation")]
+    MissingEventLoop,
     /// Failed to create the window.
     #[error("failed to create the window: {0}")]
     WindowCreation(String),
@@ -263,14 +308,6 @@ mod tests {
     use super::*;
 
     const TEST_WINDOW_TITLE: &str = "BFGE wgpu smoke test";
-
-    #[test]
-    fn zero_width_is_rejected_before_creating_event_loop() {
-        assert!(matches!(
-            PlatformAdapter::new(WindowDescriptor::new(TEST_WINDOW_TITLE, 0, 600)),
-            Err(PlatformError::InvalidWindowSize(_))
-        ));
-    }
 
     #[test]
     fn zero_height_resize_preserves_current_window_size() {
@@ -288,7 +325,7 @@ mod tests {
     #[test]
     #[ignore = "requires a desktop display and a presentation-capable GPU; opens a window"]
     fn native_surface_initializes_resizes_presents_and_reinitializes()
-    -> Result<(), Box<dyn std::error::Error>> {
+    -> core::result::Result<(), Box<dyn std::error::Error>> {
         #[cfg(target_os = "windows")]
         use winit::platform::windows::EventLoopBuilderExtWindows;
         #[cfg(target_os = "linux")]
@@ -301,10 +338,10 @@ mod tests {
         use crate::render::system::RenderSystem;
         use crate::resources::manager::ResourceManager;
 
-        let event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
         let mut platform = PlatformAdapter::create_window(
             WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
-            event_loop,
+            &mut event_loop,
         )?;
         let mut backend = WgpuRenderSystem::new();
         let resources = ResourceManager::new();
@@ -338,5 +375,180 @@ mod tests {
         backend.render(&frame, &resources)?;
         backend.shutdown();
         Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    #[ignore = "requires a desktop display and a presentation-capable GPU; opens a window and spins until closed"]
+    fn native_surface_draws_indexed_meshes() -> core::result::Result<(), Box<dyn std::error::Error>>
+    {
+        #[cfg(target_os = "windows")]
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        #[cfg(target_os = "linux")]
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        use std::f32::consts::TAU;
+
+        use crate::backend::wgpu::backend::WgpuRenderSystem;
+        use crate::math::{self, Mat4, Quat, Vec3};
+        use crate::render::frame::{RenderCamera, RenderFrame, RenderItem};
+        use crate::render::system::RenderSystem;
+        use crate::resources::library::BuiltinMesh;
+        use crate::resources::manager::ResourceManager;
+
+        let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let platform = PlatformAdapter::create_window(
+            WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
+            &mut event_loop,
+        )?;
+        platform.set_fullscreen(true);
+        let mut backend = WgpuRenderSystem::new();
+
+        let mut resources = ResourceManager::new();
+        let cube = resources.builtin(BuiltinMesh::Cube);
+
+        let view = math::view(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+        let items = [(-1.5_f32, Vec3::Y), (1.5, Vec3::X)];
+
+        backend.initialize(platform.window())?;
+
+        let mut size = platform.window().size();
+        let mut angle = 0.0_f32;
+        let mut running = true;
+        while running {
+            for event in platform.pump_events(&mut event_loop, Some(Duration::from_millis(16))) {
+                if let PlatformEvent::CloseRequested = event {
+                    running = false;
+                }
+            }
+            if !running {
+                break;
+            }
+
+            // Poll the window's real size each frame: X11 may not deliver a
+            // Resized event for the fullscreen transition, or may deliver the
+            // pre-fullscreen size, which would leave the surface too small.
+            let current = platform.window().size();
+            if current != size && current.width != 0 && current.height != 0 {
+                size = current;
+                backend.set_window_size(current)?;
+            }
+
+            let aspect = if size.height == 0 {
+                1.0
+            } else {
+                size.width as f32 / size.height as f32
+            };
+            let camera = RenderCamera {
+                view,
+                projection: math::perspective(60.0_f32.to_radians(), aspect),
+            };
+
+            angle = (angle + 0.02) % TAU;
+            let frame = RenderFrame {
+                camera,
+                items: items
+                    .iter()
+                    .map(|(offset, axis)| RenderItem {
+                        world_transform: Mat4::from_translation(Vec3::new(*offset, 0.0, 0.0))
+                            * Mat4::from_quat(Quat::from_axis_angle(*axis, angle)),
+                        mesh: cube,
+                    })
+                    .collect(),
+            };
+            let stats = backend.render(&frame, &resources)?;
+            assert_eq!(stats.draw_calls, 2);
+            assert_eq!(stats.triangles, 24);
+        }
+
+        backend.shutdown();
+        Ok(())
+    }
+
+    #[test]
+    fn rendering_an_unknown_mesh_is_reported_not_panicked() {
+        // A handle that was never registered must surface as an error rather
+        // than reaching GPU validation. Uses a real device when available and
+        // is skipped otherwise.
+        use crate::backend::wgpu::buffer::MeshBufferCache;
+        use crate::resources::handle::MeshHandle;
+        use crate::resources::manager::ResourceManager;
+
+        let device = match test_device() {
+            Some(device) => device,
+            None => return,
+        };
+        let resources = ResourceManager::new();
+        let mut cache = MeshBufferCache::default();
+
+        let result = cache.get(&device, &resources, MeshHandle::new(7));
+
+        assert!(matches!(
+            result,
+            Err(crate::render::system::RenderError::Render(message)) if message.contains("unknown mesh handle")
+        ));
+    }
+
+    /// Requests a headless adapter for CPU-side buffer tests.
+    ///
+    /// Returns `None` when no adapter is available (typical in CI), so tests
+    /// that need one stay green without a GPU.
+    fn test_device() -> Option<wgpu::Device> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .ok()?;
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+        Some(device)
+    }
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+
+    #[test]
+    fn recorder_preserves_resize_and_close_order() {
+        let window_id = WindowId::from(1);
+        let mut recorder = EventRecorder {
+            window_id: Some(window_id),
+            events: Vec::new(),
+        };
+        recorder.record(window_id, WindowEvent::Resized(PhysicalSize::new(0, 600)));
+        recorder.record(window_id, WindowEvent::CloseRequested);
+        assert_eq!(
+            recorder.events,
+            [
+                PlatformEvent::Resized(WindowSize::new(0, 600)),
+                PlatformEvent::CloseRequested
+            ]
+        );
+    }
+
+    #[test]
+    fn recorder_ignores_events_from_other_sessions() {
+        let mut recorder = EventRecorder {
+            window_id: Some(WindowId::from(1)),
+            events: Vec::new(),
+        };
+        recorder.record(WindowId::from(2), WindowEvent::CloseRequested);
+        recorder.record(
+            WindowId::from(2),
+            WindowEvent::Resized(PhysicalSize::new(800, 600)),
+        );
+        assert!(recorder.events.is_empty());
+    }
+
+    #[test]
+    fn recorder_ignores_input_and_redraw_events() {
+        let window_id = WindowId::from(1);
+        let mut recorder = EventRecorder {
+            window_id: Some(window_id),
+            events: Vec::new(),
+        };
+        recorder.record(window_id, WindowEvent::Focused(true));
+        recorder.record(window_id, WindowEvent::RedrawRequested);
+        assert!(recorder.events.is_empty());
     }
 }

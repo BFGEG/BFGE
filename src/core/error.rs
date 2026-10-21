@@ -15,9 +15,6 @@ pub enum EngineError {
     /// The engine is not initialized.
     #[error("engine is not initialized")]
     NotInitialized,
-    /// Event error.
-    #[error("error occured while processing events")]
-    EventError,
     /// Scene error (e.g. a frame handler error).
     #[error("scene error: {0}")]
     Scene(#[from] SceneError),

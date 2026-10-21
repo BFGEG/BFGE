@@ -1,6 +1,7 @@
 //! The engine's main loop and frame handlers.
 
 use std::collections::VecDeque;
+use std::time::Instant;
 
 use crate::platform::WindowSize;
 use crate::scene::api::SceneApi;
@@ -8,8 +9,8 @@ use crate::scene::error::SceneError;
 
 /// The engine's main loop.
 ///
-/// Owns the order of frame steps: user frame handlers, state update, frame
-/// build, render and present.
+/// Stores frame handlers, pending internal events and the running state.
+/// The engine drives frame build, render and present in registration order.
 #[derive(Default)]
 pub struct EngineLoop {
     callbacks: Vec<EngineEvent>,
@@ -26,6 +27,11 @@ impl EngineLoop {
     /// Returns all registered frame handlers in registration order.
     pub(super) fn callbacks(&mut self) -> &mut [EngineEvent] {
         &mut self.callbacks
+    }
+
+    pub(super) fn stop(&mut self) {
+        self.running = false;
+        self.pending.clear();
     }
 
     /// Sets the running state of the engine loop.
@@ -58,16 +64,48 @@ pub(crate) enum InternalEvent {
     Tick,
     /// The window was resized: recreate the surface and update the frame size.
     WindowResized(WindowSize),
-    /// The window was closed: stop and move to `ShuttingDown`.
+    /// The window was closed: stop rendering until the client shuts down.
     WindowClosed,
+}
+
+pub(super) struct FrameClock {
+    last_event: Instant,
+    last_frame: Instant,
+    frame_delta: f32,
+}
+
+impl FrameClock {
+    pub(super) fn new(now: Instant) -> Self {
+        Self {
+            last_event: now,
+            last_frame: now,
+            frame_delta: 0.0,
+        }
+    }
+
+    pub(super) fn begin_frame(&mut self, now: Instant) {
+        self.frame_delta = now.duration_since(self.last_frame).as_secs_f32();
+        self.last_frame = now;
+    }
+
+    pub(super) fn event_time(&mut self, now: Instant) -> EventTime {
+        let time = EventTime {
+            time_since_last_event: now.duration_since(self.last_event).as_secs_f32(),
+            time_since_last_frame: self.frame_delta,
+        };
+        self.last_event = now;
+        time
+    }
 }
 
 /// Times passed to user frame handlers.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EventTime {
-    /// Time since the last event, in seconds.
+    /// Time since the previous frame handler call, in seconds.
+    /// For the first call, measured from loop startup.
     pub time_since_last_event: f32,
-    /// Time since the last frame, in seconds.
+    /// Time between starts of consecutive frames, in seconds.
+    /// For the first frame, measured from loop startup.
     pub time_since_last_frame: f32,
 }
 
@@ -77,8 +115,49 @@ pub type FrameHandler = Box<dyn FnMut(&mut dyn SceneApi, &EventTime) -> Result<(
 /// User frame handlers, called by the loop on every pass in registration
 /// order, with access to the scene and frame times.
 pub struct EngineEvent {
-    /// Called before the update and frame build.
+    /// Called before frame build.
     pub frame_started: FrameHandler,
-    /// Called after the frame is presented.
+    /// Called after a successful render attempt, even if the backend skips it.
     pub frame_ended: FrameHandler,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn internal_events_are_consumed_in_fifo_order() {
+        let mut event_loop = EngineLoop::default();
+        let size = WindowSize::new(800, 600);
+        event_loop.push_internal(InternalEvent::WindowResized(size));
+        event_loop.push_internal(InternalEvent::Tick);
+        event_loop.push_internal(InternalEvent::WindowClosed);
+        assert!(
+            matches!(event_loop.next_internal(), Some(InternalEvent::WindowResized(actual)) if actual == size)
+        );
+        assert!(matches!(
+            event_loop.next_internal(),
+            Some(InternalEvent::Tick)
+        ));
+        assert!(matches!(
+            event_loop.next_internal(),
+            Some(InternalEvent::WindowClosed)
+        ));
+        assert!(event_loop.next_internal().is_none());
+    }
+
+    #[test]
+    fn stopping_discards_pending_events_but_keeps_callbacks() {
+        let mut event_loop = EngineLoop::default();
+        event_loop.add_event(EngineEvent {
+            frame_started: Box::new(|_, _| Ok(())),
+            frame_ended: Box::new(|_, _| Ok(())),
+        });
+        event_loop.set_running(true);
+        event_loop.push_internal(InternalEvent::Tick);
+        event_loop.stop();
+        assert!(!event_loop.is_running());
+        assert!(event_loop.next_internal().is_none());
+        assert_eq!(event_loop.callbacks().len(), 1);
+    }
 }
