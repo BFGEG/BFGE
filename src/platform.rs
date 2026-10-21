@@ -3,11 +3,18 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(test)]
+use std::cell::RefCell;
+#[cfg(test)]
+use std::rc::Rc;
+
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::platform::pump_events::EventLoopExtPumpEvents;
+#[cfg(test)]
+use winit::window::Fullscreen;
 use winit::window::{Window as NativeWindow, WindowId};
 
 /// Module-wide `Result` with [`PlatformError`] as the error type.
@@ -155,6 +162,86 @@ impl PlatformAdapter {
             },
         }
     }
+
+    /// Pumps pending window events, returning the ones the caller cares about.
+    ///
+    /// Test-only: drives a manual render loop so an interactive smoke test can
+    /// keep drawing until the window is closed. Returns an empty list when the
+    /// adapter was built without a real event loop (e.g. [`Self::for_test`]).
+    #[cfg(test)]
+    pub(crate) fn pump_once(&mut self, timeout: Option<Duration>) -> Vec<PlatformEvent> {
+        let Some(event_loop) = self._event_loop.as_mut() else {
+            return Vec::new();
+        };
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let mut recorder = EventRecorder {
+            events: Rc::clone(&events),
+        };
+        event_loop.pump_app_events(timeout, &mut recorder);
+        Rc::try_unwrap(events)
+            .map(RefCell::into_inner)
+            .unwrap_or_default()
+    }
+
+    /// Toggles borderless fullscreen on the current monitor.
+    ///
+    /// Test-only: lets an interactive smoke test fill the screen. Uses a
+    /// borderless mode (no video-mode switch), which is the least intrusive and
+    /// works across X11/Wayland/Windows.
+    #[cfg(test)]
+    pub(crate) fn set_fullscreen(&self, fullscreen: bool) {
+        match &self.window.inner {
+            WindowInner::Native(window) => {
+                let mode = fullscreen.then(|| Fullscreen::Borderless(None));
+                window.set_fullscreen(mode);
+            }
+            #[cfg(test)]
+            WindowInner::Test(_) => {}
+        }
+    }
+}
+
+/// A platform event surfaced by [`PlatformAdapter::pump_once`] for tests.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlatformEvent {
+    /// The window's close button was pressed (or close was requested).
+    CloseRequested,
+    /// The window was resized to the given size.
+    Resized(WindowSize),
+}
+
+/// Collects the window events a manual test loop reacts to.
+#[cfg(test)]
+struct EventRecorder {
+    events: Rc<RefCell<Vec<PlatformEvent>>>,
+}
+
+#[cfg(test)]
+impl ApplicationHandler for EventRecorder {
+    fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
+
+    fn window_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _window_id: WindowId,
+        event: WindowEvent,
+    ) {
+        match event {
+            WindowEvent::CloseRequested => {
+                self.events.borrow_mut().push(PlatformEvent::CloseRequested);
+            }
+            WindowEvent::Resized(size) => {
+                self.events
+                    .borrow_mut()
+                    .push(PlatformEvent::Resized(WindowSize::new(
+                        size.width,
+                        size.height,
+                    )));
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Creates a new event loop for the engine.
@@ -298,5 +385,130 @@ mod tests {
         backend.render(&frame, &resources)?;
         backend.shutdown();
         Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    #[ignore = "requires a desktop display and a presentation-capable GPU; opens a window and spins until closed"]
+    fn native_surface_draws_indexed_meshes() -> Result<(), Box<dyn std::error::Error>> {
+        #[cfg(target_os = "windows")]
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        #[cfg(target_os = "linux")]
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        use std::f32::consts::TAU;
+
+        use crate::backend::wgpu::backend::WgpuRenderSystem;
+        use crate::math::{self, Mat4, Quat, Vec3};
+        use crate::render::frame::{RenderCamera, RenderFrame, RenderItem};
+        use crate::render::system::RenderSystem;
+        use crate::resources::library::BuiltinMesh;
+        use crate::resources::manager::ResourceManager;
+
+        let event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let mut platform = PlatformAdapter::create_window(
+            WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
+            event_loop,
+        )?;
+        platform.set_fullscreen(true);
+        let mut backend = WgpuRenderSystem::new();
+
+        let mut resources = ResourceManager::new();
+        let cube = resources.builtin(BuiltinMesh::Cube);
+
+        let view = math::view(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+        let items = [(-1.5_f32, Vec3::Y), (1.5, Vec3::X)];
+
+        backend.initialize(platform.window())?;
+
+        let mut size = platform.window().size();
+        let mut angle = 0.0_f32;
+        let mut running = true;
+        while running {
+            for event in platform.pump_once(Some(Duration::from_millis(16))) {
+                if let PlatformEvent::CloseRequested = event {
+                    running = false;
+                }
+            }
+            if !running {
+                break;
+            }
+
+            // Poll the window's real size each frame: X11 may not deliver a
+            // Resized event for the fullscreen transition, or may deliver the
+            // pre-fullscreen size, which would leave the surface too small.
+            let current = platform.window().size();
+            if current != size && current.width != 0 && current.height != 0 {
+                size = current;
+                backend.set_window_size(current)?;
+            }
+
+            let aspect = if size.height == 0 {
+                1.0
+            } else {
+                size.width as f32 / size.height as f32
+            };
+            let camera = RenderCamera {
+                view,
+                projection: math::perspective(60.0_f32.to_radians(), aspect),
+            };
+
+            angle = (angle + 0.02) % TAU;
+            let frame = RenderFrame {
+                camera,
+                items: items
+                    .iter()
+                    .map(|(offset, axis)| RenderItem {
+                        world_transform: Mat4::from_translation(Vec3::new(*offset, 0.0, 0.0))
+                            * Mat4::from_quat(Quat::from_axis_angle(*axis, angle)),
+                        mesh: cube,
+                    })
+                    .collect(),
+            };
+            let stats = backend.render(&frame, &resources)?;
+            assert_eq!(stats.draw_calls, 2);
+            assert_eq!(stats.triangles, 24);
+        }
+
+        backend.shutdown();
+        Ok(())
+    }
+
+    #[test]
+    fn rendering_an_unknown_mesh_is_reported_not_panicked() {
+        // A handle that was never registered must surface as an error rather
+        // than reaching GPU validation. Uses a real device when available and
+        // is skipped otherwise.
+        use crate::backend::wgpu::buffer::MeshBufferCache;
+        use crate::resources::handle::MeshHandle;
+        use crate::resources::manager::ResourceManager;
+
+        let device = match test_device() {
+            Some(device) => device,
+            None => return,
+        };
+        let resources = ResourceManager::new();
+        let mut cache = MeshBufferCache::default();
+
+        let result = cache.get(&device, &resources, MeshHandle::new(7));
+
+        assert!(matches!(
+            result,
+            Err(crate::render::system::RenderError::Render(message)) if message.contains("unknown mesh handle")
+        ));
+    }
+
+    /// Requests a headless adapter for CPU-side buffer tests.
+    ///
+    /// Returns `None` when no adapter is available (typical in CI), so tests
+    /// that need one stay green without a GPU.
+    fn test_device() -> Option<wgpu::Device> {
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let adapter =
+            pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
+                .ok()?;
+        let (device, _queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
+        Some(device)
     }
 }

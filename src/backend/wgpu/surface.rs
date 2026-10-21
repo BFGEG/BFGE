@@ -8,19 +8,32 @@ use crate::platform::{Window, WindowSize};
 use crate::render::system::RenderError;
 
 const DEVICE_LABEL: &str = "BFGE device";
-const ENCODER_LABEL: &str = "BFGE frame encoder";
-const CLEAR_PASS_LABEL: &str = "BFGE surface clear";
 const NO_CONFIGURATION: &str = "adapter does not support the window surface";
 const ACQUISITION_FAILED: &str = "surface is unavailable after recovery";
 const SURFACE_VALIDATION_FAILED: &str = "surface texture acquisition failed validation";
-const CLEAR_COLOR: wgpu::Color = wgpu::Color::BLACK;
 const ACQUISITION_ATTEMPTS: usize = 2;
+
+/// A frame's acquired surface texture, its color view and pixel size.
+///
+/// Owned by the caller between [`RenderSurface::begin_frame`] and
+/// [`RenderSurface::present`], so the surface stays free to be borrowed for its
+/// device and queue while drawing.
+#[derive(Debug)]
+pub(crate) struct SurfaceFrame {
+    output: wgpu::SurfaceTexture,
+    view: wgpu::TextureView,
+    pub(crate) size: WindowSize,
+}
+
+impl SurfaceFrame {
+    pub(crate) fn view(&self) -> &wgpu::TextureView {
+        &self.view
+    }
+}
 
 /// A window-bound render surface with its device and presentation queue.
 ///
 /// Zero-sized surfaces are suspended until resized to nonzero dimensions.
-/// This initialization milestone clears and presents the surface; geometry
-/// drawing is implemented separately in issue #13.
 #[derive(Debug)]
 pub struct RenderSurface {
     surface: wgpu::Surface<'static>,
@@ -117,45 +130,48 @@ impl RenderSurface {
         Ok(())
     }
 
-    pub(crate) fn clear_and_present(&mut self) -> Result<(), RenderError> {
-        if is_drawable(self.size) {
-            if !self.configured {
-                self.configure()?;
-            }
-            if let Some(output) = self.acquire()? {
-                checked_gpu_operation(&self.device, || {
-                    let view = output
-                        .texture
-                        .create_view(&wgpu::TextureViewDescriptor::default());
-                    let mut encoder =
-                        self.device
-                            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                                label: Some(ENCODER_LABEL),
-                            });
-                    {
-                        let _pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                            label: Some(CLEAR_PASS_LABEL),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                                view: &view,
-                                depth_slice: None,
-                                resolve_target: None,
-                                ops: wgpu::Operations {
-                                    load: wgpu::LoadOp::Clear(CLEAR_COLOR),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            ..Default::default()
-                        });
-                    }
-                    self.queue.submit([encoder.finish()]);
-                    self.window.pre_present_notify();
-                    self.queue.present(output);
-                })?;
-            }
-            Ok(())
-        } else {
-            Ok(())
+    /// The GPU device used for all backend resources.
+    pub(crate) fn device(&self) -> &wgpu::Device {
+        &self.device
+    }
+
+    /// The queue used to submit work and upload buffers.
+    pub(crate) fn queue(&self) -> &wgpu::Queue {
+        &self.queue
+    }
+
+    /// The swapchain texture format the pipeline must target.
+    pub(crate) fn format(&self) -> wgpu::TextureFormat {
+        self.config.format
+    }
+
+    /// Acquires the next swapchain image for drawing.
+    ///
+    /// Returns `None` for a zero-sized (minimized) surface, when the surface is
+    /// not ready to present a frame, or when the surface is not drawable.
+    pub(crate) fn begin_frame(&mut self) -> Result<Option<SurfaceFrame>, RenderError> {
+        if !is_drawable(self.size) {
+            return Ok(None);
         }
+        if !self.configured {
+            self.configure()?;
+        }
+        let size = self.size;
+        match self.acquire()? {
+            Some(output) => {
+                let view = output
+                    .texture
+                    .create_view(&wgpu::TextureViewDescriptor::default());
+                Ok(Some(SurfaceFrame { output, view, size }))
+            }
+            None => Ok(None),
+        }
+    }
+
+    /// Presents a frame acquired with [`RenderSurface::begin_frame`].
+    pub(crate) fn present(&self, frame: SurfaceFrame) {
+        self.window.pre_present_notify();
+        self.queue.present(frame.output);
     }
 
     fn acquire(&mut self) -> Result<Option<wgpu::SurfaceTexture>, RenderError> {
