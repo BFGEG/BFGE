@@ -8,15 +8,18 @@ FIFO/VSync, прогрев 2 секунды перед каждым измере
 Запуск в release-сборке из корня репозитория:
 
 ```bash
-cargo run --release --locked --features stress-benchmark --bin bfge-stress -- scene-only docs/stress-config.json docs/stress-scene-only.json
-cargo run --release --locked --features stress-benchmark --bin bfge-stress -- window docs/stress-config.json docs/stress-window.json
+cargo run --release --locked --features stress-benchmark --bin bfge-stress -- scene-only docs/stress-config.json target/stress-scene-only.json
+cargo run --release --locked --features stress-benchmark --bin bfge-stress -- window docs/stress-config.json target/stress-window.json
 ```
 
-Для повторения опубликованного здесь оконного прогона на X11 (если сеанс также
-предоставляет Wayland) запускался уже собранный бинарник командой:
+Выходные JSON остаются в игнорируемом Git каталоге `target/`; сводные
+исходные измерения для ревью размещаются в описании PR.
+
+Для прогона на X11 (если сеанс также предоставляет Wayland) можно запустить
+собранный бинарник командой:
 
 ```bash
-timeout 180s env -u WAYLAND_DISPLAY target/release/bfge-stress window docs/stress-config.json docs/stress-window.json
+timeout 180s env -u WAYLAND_DISPLAY target/release/bfge-stress window docs/stress-config.json target/stress-window.json
 ```
 
 `scene-only` измеряет только `SceneManager::build_render_frame` и RSS процесса;
@@ -42,8 +45,8 @@ FIFO, затем измеряет подготовку, полный прохо�
 
 Для проверки зависаний оконный прогон стоит запускать с внешним ограничением
 времени, превышающим сумму прогрева и измерений, например через `timeout` на
-Linux. Сбой или превышение лимита означает незавершённый прогон; JSON тогда
-не создаётся. Разрешение, режим синхронизации, CPU и адаптер GPU записываются
+Linux. Сбой или превышение лимита означает незавершённый прогон; новый отчёт
+тогда не записывается. Разрешение, режим синхронизации, CPU и адаптер GPU записываются
 в отчёт. Изменения RSS во время длительного прогона следует оценивать по
 секундным отсчётам; удержание памяти аллокатором и гистограмма измерений
 также влияют на RSS.
