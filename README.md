@@ -1,4 +1,4 @@
-# BFGE — FREAK Engine
+# BFGE Engine
 
 Blazingly Fast Graphic Engine — графический движок на Rust для desktop-приложений.
 Движок владеет окном и циклом отображения; клиент загружает модели, строит сцену
