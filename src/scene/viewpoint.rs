@@ -3,6 +3,12 @@
 use crate::math::Vec3;
 
 /// State of the single viewpoint.
+///
+/// Uses a right-handed coordinate system with `+Y` up, independently of scene
+/// nodes. Defaults to `(0, 0, 5)`, looking along `-Z`, with a 60° vertical field
+/// of view. Smaller `fov_y` values zoom in. The current projection clips at
+/// 0.1 and 100 world units; the aspect ratio follows the window size.
+/// See [`crate::SceneApi::set_viewpoint`] for numeric preconditions.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewpointState {
     /// Viewpoint position.

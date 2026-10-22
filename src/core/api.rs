@@ -11,47 +11,78 @@ use crate::systems::loading::ModelLoadError;
 use crate::systems::persistence::ScenePersistenceError;
 
 /// Public operations to drive the engine and exchange data with the client.
+///
+/// Import this trait to call operations on [`crate::Engine`]. Window operations
+/// require a desktop session; scene operations and snapshots also work headlessly.
 pub trait EngineApi {
-    /// Initializes the engine internals, creates the window and the initial
-    /// scene.
+    /// Creates the window and initializes the graphics system.
     ///
-    /// Call this on the application's main thread. Explicit window dimensions
-    /// must be nonzero; platform and graphics failures are returned as errors.
+    /// Call this on the application's main thread with nonzero window dimensions.
+    /// The engine owns the window and its event loop. The scene created by
+    /// [`crate::Engine::new`] is preserved, including models loaded beforehand.
+    /// Reuse the same engine for later sessions: only one window event loop
+    /// may be created per process.
     ///
-    /// The window is created by the engine; the client does not manage the
-    /// windowing or graphics platform. The initial scene contains a root node
-    /// and a viewpoint and lighting with default values, but no scene objects.
+    /// # Errors
+    ///
+    /// Returns [`EngineError::AlreadyInitialized`] if already initialized,
+    /// [`EngineError::Platform`] for invalid dimensions or window failures, or
+    /// [`EngineError::Lifecycle`] for graphics initialization failures.
     fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError>;
 
-    /// Runs the engine's main loop until the window is closed.
+    /// Runs the engine's main loop until the window closes or an error occurs.
     ///
-    /// The loop updates the scene and presents it in the window; the client
-    /// does not drive individual frame steps. Returns after the window is
-    /// closed, on a frame handler error, or on an unrecoverable error.
-    /// The engine remains initialized until [`Self::shutdown`] is called.
-    /// A failed run clears pending events; registered handlers are retained.
+    /// The loop calls frame handlers and renders the scene; the client does not
+    /// drive individual frames. The engine remains initialized until
+    /// [`Self::shutdown`] is called. Every return clears pending events and
+    /// retains handlers and scene changes.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::NotInitialized`] before initialization or after
+    /// shutdown. Handler errors return as [`EngineError::Scene`]; rendering and
+    /// platform errors preserve their causes. A rendering error skips
+    /// `frame_ended`.
     fn run(&mut self) -> Result<(), EngineError>;
 
-    /// Registers user frame handlers.
+    /// Registers user frame handlers in registration order.
     ///
-    /// `frame_started` is called before frame build;
-    /// `frame_ended` is called after a successful render attempt. Handlers are
-    /// called in registration order and receive access to the scene and frame
-    /// times. A handler error stops the loop and is returned from `run`.
-    /// Applied scene changes are retained even if a later handler fails.
-    /// Both handler phases are paused while the window has a zero dimension.
+    /// All `frame_started` handlers run before frame assembly, then all
+    /// `frame_ended` handlers run after a successful render attempt, including
+    /// a skipped presentation. A handler error stops the loop; applied changes
+    /// remain. Both phases pause while either window dimension is zero.
+    ///
+    /// Registration is available before initialization; handlers survive
+    /// shutdown. Captured scene IDs must be valid before the next run.
+    /// Handlers are owned and may capture state, but any captured borrows must
+    /// be `'static`. See [`EngineEvent`] for an animation example.
+    ///
+    /// # Errors
+    ///
+    /// Registration currently always succeeds. Handler invocation errors are
+    /// returned by [`Self::run`].
     fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError>;
 
-    /// Shuts the engine and its internals down.
+    /// Releases graphics and the window, and resets the scene and resources.
+    ///
+    /// The saved snapshot, window event loop and frame handlers are retained.
+    /// Old scene IDs are not checked for session identity and may refer to
+    /// unrelated nodes after a reset. Call this even after [`Self::run`] fails.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::NotInitialized`] if no session is active.
     fn shutdown(&mut self) -> Result<(), EngineError>;
 
     /// Returns access to operations over the current scene.
+    ///
+    /// Available immediately after construction and after shutdown. Changes
+    /// made before [`Self::initialize`] are preserved by initialization.
     fn scene(&mut self) -> &mut dyn SceneApi;
 
-    /// Loads a model from a file and creates a separate scene object for it.
+    /// Loads a model from `path` and attaches a new object to `parent`.
     ///
-    /// The object is immediately linked to the given node. Every call creates
-    /// a new object, including repeated loads of the same file.
+    /// Every call creates a new object, including repeated loads of one file.
     /// Supports `.gltf`, `.glb` and `.obj`; parts share the first explicit color
     /// on used geometry, or neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
     /// Textures and model-provided normals are ignored. Scene lighting is
@@ -68,15 +99,40 @@ pub trait EngineApi {
         parent: SceneNodeId,
     ) -> Result<SceneObjectId, ModelLoadError>;
 
-    /// Sets the size of the engine's window.
+    /// Sets the window size in physical pixels; both dimensions must be nonzero.
     ///
-    /// May be called while the engine is running; the window and the render
-    /// surface are rebuilt for the new size.
+    /// The backend is resized before requesting the window resize. During
+    /// [`Self::run`], the caller cannot access the engine; handlers only receive
+    /// [`SceneApi`]. Native resize events are handled by the loop automatically.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`EngineError::NotInitialized`] without a session,
+    /// [`EngineError::Platform`] for zero dimensions or a window resize failure,
+    /// or [`EngineError::Render`] if the backend rejects the requested size.
     fn set_window_size(&mut self, size: WindowSize) -> Result<(), EngineError>;
 
-    /// Saves the full scene state to the engine-defined storage.
+    /// Saves nodes, objects, mesh data and the viewpoint in memory.
+    ///
+    /// Replaces the previous snapshot. Survives shutdown, but is lost when the
+    /// engine is dropped. Does not save the window or frame handlers, or write
+    /// a file. Available without graphics initialization.
+    ///
+    /// # Errors
+    ///
+    /// Currently always succeeds; the result allows future storage failures.
     fn save_scene(&mut self) -> Result<(), ScenePersistenceError>;
 
-    /// Restores the saved scene if the current scene contains no objects.
+    /// Replaces an object-free scene and its resources with the saved snapshot.
+    ///
+    /// Nodes alone do not make a scene occupied. No save is a successful no-op.
+    /// The occupancy check precedes the snapshot check. Does not recreate the
+    /// window or register frame handlers. Available without initialization.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ScenePersistenceError::SceneNotEmpty`] when objects exist, or
+    /// [`ScenePersistenceError::Restore`] for an invalid snapshot. On error the
+    /// current scene and resources remain unchanged.
     fn restore_scene(&mut self) -> Result<(), ScenePersistenceError>;
 }

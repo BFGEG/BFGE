@@ -2,14 +2,31 @@
 
 use crate::math::{Mat4, Quat, Vec3};
 
-/// Position, rotation and scale.
+/// Position, quaternion rotation and scale relative to the parent node.
+///
+/// The local matrix applies scale, then rotation, then translation. Defaults
+/// to zero translation, identity rotation and unit scale. Setting a node's
+/// transform replaces all three components; constructors set the other
+/// components to their defaults. Numeric values are not validated by the scene.
+///
+/// ```
+/// use BFGE::math::{Quat, Vec3};
+/// use BFGE::Transform;
+///
+/// let transform = Transform {
+///     translation: Vec3::new(1.0, 0.0, 0.0),
+///     rotation: Quat::from_rotation_y(0.5),
+///     scale: Vec3::splat(0.5),
+/// };
+/// assert_eq!(transform.translation.x, 1.0);
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
-    /// Translation.
+    /// Translation in parent-space units.
     pub translation: Vec3,
-    /// Rotation.
+    /// Rotation as a unit quaternion.
     pub rotation: Quat,
-    /// Scale.
+    /// Independent scale factors for the X, Y and Z axes.
     pub scale: Vec3,
 }
 

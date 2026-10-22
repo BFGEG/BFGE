@@ -21,14 +21,16 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 /// Engine facade and orchestrator: links the scene, resources, systems,
 /// renderer, window and the frame lifecycle.
 ///
-/// The current skeleton supports construction, scene access and frame handler
-/// registration, window creation and GPU initialization. The main loop calls
+/// Supports scene access, model loading, snapshots, window creation and GPU
+/// initialization. The main loop calls
 /// frame handlers and presents frames until the window closes or an error occurs.
 ///
 /// A session is the interval between [`EngineApi::initialize`] and
 /// [`EngineApi::shutdown`]. The engine itself, its event loop and its scene
 /// store survive shutdown; the window, the platform adapter and `scene` and
-/// `resources` are recreated per session.
+/// `resources` are reset by shutdown. Initialization preserves any scene built
+/// before it. Registered frame handlers survive shutdown and must only use IDs
+/// valid in the current scene.
 pub struct Engine {
     parts: EngineParts,
     event_loop: EngineLoop,
@@ -39,7 +41,10 @@ pub struct Engine {
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 impl Engine {
-    /// Creates the engine; the parts are assembled by `systems::lifecycle`.
+    /// Creates an engine with an empty scene, a root node and a default viewpoint.
+    ///
+    /// Does not create a window or initialize the GPU. Scene operations, model
+    /// loading, snapshots and frame handler registration are available immediately.
     pub fn new() -> Self {
         Self {
             parts: lifecycle::create(),

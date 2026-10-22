@@ -99,6 +99,10 @@ impl FrameClock {
 }
 
 /// Times passed to user frame handlers.
+///
+/// Use `time_since_last_frame` for animation: it is the same for all handlers
+/// of a frame. It includes time spent with a zero-sized window before the
+/// first resumed frame; clamp it in the application if large steps are unwanted.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct EventTime {
     /// Time since the previous frame handler call, in seconds.
@@ -114,6 +118,30 @@ pub type FrameHandler = Box<dyn FnMut(&mut dyn SceneApi, &EventTime) -> Result<(
 
 /// User frame handlers, called by the loop on every pass in registration
 /// order, with access to the scene and frame times.
+///
+/// All `frame_started` handlers run before frame assembly, then all
+/// `frame_ended` handlers run after a successful render attempt. A backend
+/// timeout may skip presentation and still call `frame_ended`. Any handler
+/// error stops the loop and becomes [`crate::EngineError::Scene`], preserving
+/// changes already made. Both phases pause for a zero-sized window.
+///
+/// ```
+/// use BFGE::math::Quat;
+/// use BFGE::{Engine, EngineApi, EngineEvent, Transform};
+///
+/// let mut engine = Engine::new();
+/// let root = engine.scene().root_node();
+/// let node = engine.scene().create_node(root)?;
+/// let mut angle = 0.0;
+/// engine.add_event(EngineEvent {
+///     frame_started: Box::new(move |scene, time| {
+///         angle = (angle + time.time_since_last_frame) % std::f32::consts::TAU;
+///         scene.set_node_transform(node, Transform::from_rotation(Quat::from_rotation_y(angle)))
+///     }),
+///     frame_ended: Box::new(|_, _| Ok(())),
+/// })?;
+/// # Ok::<(), BFGE::EngineError>(())
+/// ```
 pub struct EngineEvent {
     /// Called before frame build.
     pub frame_started: FrameHandler,
