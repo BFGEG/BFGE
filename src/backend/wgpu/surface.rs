@@ -48,7 +48,10 @@ pub struct RenderSurface {
 }
 
 impl RenderSurface {
-    pub(crate) fn new(window: &Window) -> Result<Self, RenderError> {
+    pub(crate) fn new_with_present_mode(
+        window: &Window,
+        present_mode: Option<wgpu::PresentMode>,
+    ) -> Result<Self, RenderError> {
         let size = window.size();
         let native = window
             .native()
@@ -78,9 +81,19 @@ impl RenderSurface {
                 .map_err(|error| RenderError::Initialization(format!("request device: {error}")))?;
             Ok::<_, RenderError>((adapter, device, queue))
         })?;
-        let config = surface
+        let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or_else(|| RenderError::Initialization(NO_CONFIGURATION.to_owned()))?;
+        if let Some(mode) = present_mode {
+            let capabilities = surface.get_capabilities(&adapter);
+            if !capabilities.present_modes.contains(&mode) {
+                return Err(RenderError::Initialization(format!(
+                    "requested present mode {mode:?} is unsupported; available: {:?}",
+                    capabilities.present_modes
+                )));
+            }
+            config.present_mode = mode;
+        }
         let mut result = Self {
             surface,
             config,
@@ -96,6 +109,11 @@ impl RenderSurface {
             .resize(size)
             .map_err(|error| RenderError::Initialization(format!("configure surface: {error}")))?;
         Ok(result)
+    }
+
+    #[cfg(feature = "stress-benchmark")]
+    pub(crate) fn adapter_info(&self) -> wgpu::AdapterInfo {
+        self.adapter.get_info()
     }
 
     pub(crate) fn resize(&mut self, size: WindowSize) -> Result<(), RenderError> {

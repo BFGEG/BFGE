@@ -1,0 +1,18 @@
+{
+  "width": 800,
+  "height": 600,
+  "sync_mode": "vsync",
+  "warmup_seconds": 2,
+  "scenarios": [
+    {"name":"objects_100_shared","objects":100,"nodes":101,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":3},
+    {"name":"objects_500_shared","objects":500,"nodes":101,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":3},
+    {"name":"objects_1000_shared","objects":1000,"nodes":101,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":3},
+    {"name":"objects_500_distinct","objects":500,"nodes":101,"depth":1,"triangles_per_mesh":12,"meshes":500,"duration_seconds":3},
+    {"name":"nodes_1001","objects":500,"nodes":1001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":3},
+    {"name":"depth_32","objects":500,"nodes":1001,"depth":32,"triangles_per_mesh":12,"meshes":1,"duration_seconds":3},
+    {"name":"depth_64","objects":500,"nodes":1001,"depth":64,"triangles_per_mesh":12,"meshes":1,"duration_seconds":3},
+    {"name":"triangles_120","objects":500,"nodes":101,"depth":1,"triangles_per_mesh":120,"meshes":1,"duration_seconds":3},
+    {"name":"triangles_1200","objects":500,"nodes":101,"depth":1,"triangles_per_mesh":1200,"meshes":1,"duration_seconds":3},
+    {"name":"long_500_shared","objects":500,"nodes":101,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":60}
+  ]
+}

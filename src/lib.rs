@@ -14,6 +14,8 @@ pub mod platform;
 pub mod render;
 pub mod resources;
 pub mod scene;
+#[cfg(feature = "stress-benchmark")]
+pub mod stress;
 pub mod systems;
 
 pub use crate::core::api::EngineApi;

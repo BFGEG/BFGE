@@ -11,3 +11,6 @@ cargo run --example rotating_model -- path/to/model.gltf
 
 Закрытие окна завершает цикл и освобождает движок. Пример требует графической
 сессии; обычные тесты цикла выполняются без окна и GPU.
+
+Воспроизводимые release-замеры сцены и рендера: [docs/Stress_Testing.md](docs/Stress_Testing.md).
+Исходные результаты: [docs/Stress_Results_2026-10-22.md](docs/Stress_Results_2026-10-22.md).

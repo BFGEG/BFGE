@@ -1,7 +1,7 @@
 //! Desktop window and platform adapter owned by the engine.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -16,6 +16,7 @@ use winit::window::{Window as NativeWindow, WindowId};
 type Result<T> = core::result::Result<T, PlatformError>;
 
 const WINDOW_NOT_RESUMED: &str = "the window event loop did not resume during initialization";
+const WINDOW_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(test)]
 const TEST_WINDOW_UNAVAILABLE: &str = "the test window has no native window handle";
 
@@ -119,7 +120,13 @@ impl PlatformAdapter {
             descriptor,
             result: None,
         };
-        event_loop.pump_app_events(Some(Duration::ZERO), &mut bootstrap);
+        let deadline = Instant::now() + WINDOW_BOOTSTRAP_TIMEOUT;
+        while bootstrap.result.is_none() && Instant::now() < deadline {
+            event_loop.pump_app_events(
+                Some(deadline.saturating_duration_since(Instant::now())),
+                &mut bootstrap,
+            );
+        }
         let native = bootstrap
             .result
             .ok_or_else(|| PlatformError::WindowCreation(WINDOW_NOT_RESUMED.to_owned()))??;
@@ -255,8 +262,8 @@ struct WindowBootstrap {
     result: Option<Result<Arc<NativeWindow>>>,
 }
 
-impl ApplicationHandler for WindowBootstrap {
-    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+impl WindowBootstrap {
+    fn create_window(&mut self, event_loop: &ActiveEventLoop) {
         if self.result.is_none() {
             let attributes = NativeWindow::default_attributes()
                 .with_title(&self.descriptor.title)
@@ -271,6 +278,16 @@ impl ApplicationHandler for WindowBootstrap {
                     .map_err(|error| PlatformError::WindowCreation(error.to_string())),
             );
         }
+    }
+}
+
+impl ApplicationHandler for WindowBootstrap {
+    fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.create_window(event_loop);
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.create_window(event_loop);
     }
 
     fn window_event(
@@ -374,6 +391,31 @@ mod tests {
         backend.initialize(platform.window())?;
         backend.render(&frame, &resources)?;
         backend.shutdown();
+        Ok(())
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    #[test]
+    #[ignore = "requires a desktop display; opens two windows"]
+    fn native_window_can_be_created_twice_on_one_event_loop()
+    -> core::result::Result<(), Box<dyn std::error::Error>> {
+        #[cfg(target_os = "windows")]
+        use winit::platform::windows::EventLoopBuilderExtWindows;
+        #[cfg(target_os = "linux")]
+        use winit::platform::x11::EventLoopBuilderExtX11;
+
+        let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let first = PlatformAdapter::new(
+            WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
+            &mut event_loop,
+        )?;
+        assert_eq!(first.window().size(), WindowSize::new(320, 240));
+        drop(first);
+        let second = PlatformAdapter::new(
+            WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
+            &mut event_loop,
+        )?;
+        assert_eq!(second.window().size(), WindowSize::new(320, 240));
         Ok(())
     }
 

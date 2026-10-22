@@ -3,6 +3,14 @@ name = "BFGE"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+stress-benchmark = []
+
+[[bin]]
+name = "bfge-stress"
+path = "src/bin/bfge_stress.rs"
+required-features = ["stress-benchmark"]
+
 [dependencies]
 bytemuck = { version = "1", features = ["derive"] }
 base64 = "0.22"
