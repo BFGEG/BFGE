@@ -6,8 +6,8 @@ version = 4
 name = "BFGE"
 version = "0.1.0"
 dependencies = [
- "bytemuck",
  "base64",
+ "bytemuck",
  "glam",
  "gltf",
  "percent-encoding",

@@ -3,11 +3,6 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(test)]
-use std::cell::RefCell;
-#[cfg(test)]
-use std::rc::Rc;
-
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::WindowEvent;
@@ -163,24 +158,21 @@ impl PlatformAdapter {
         }
     }
 
-    /// Pumps pending window events, returning the ones the caller cares about.
-    ///
-    /// Test-only: drives a manual render loop so an interactive smoke test can
-    /// keep drawing until the window is closed. Returns an empty list when the
-    /// adapter was built without a real event loop (e.g. [`Self::for_test`]).
-    #[cfg(test)]
-    pub(crate) fn pump_once(&mut self, timeout: Option<Duration>) -> Vec<PlatformEvent> {
-        let Some(event_loop) = self._event_loop.as_mut() else {
-            return Vec::new();
-        };
-        let events = Rc::new(RefCell::new(Vec::new()));
+    pub(crate) fn pump_events(
+        &self,
+        event_loop: &mut EventLoop<()>,
+        timeout: Option<Duration>,
+    ) -> Vec<PlatformEvent> {
         let mut recorder = EventRecorder {
-            events: Rc::clone(&events),
+            window_id: match &self.window.inner {
+                WindowInner::Native(window) => Some(window.id()),
+                #[cfg(test)]
+                WindowInner::Test(_) => None,
+            },
+            events: Vec::new(),
         };
         event_loop.pump_app_events(timeout, &mut recorder);
-        Rc::try_unwrap(events)
-            .map(RefCell::into_inner)
-            .unwrap_or_default()
+        recorder.events
     }
 
     /// Toggles borderless fullscreen on the current monitor.
@@ -201,8 +193,7 @@ impl PlatformAdapter {
     }
 }
 
-/// A platform event surfaced by [`PlatformAdapter::pump_once`] for tests.
-#[cfg(test)]
+/// A window event delivered to the engine loop.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PlatformEvent {
     /// The window's close button was pressed (or close was requested).
@@ -211,36 +202,35 @@ pub(crate) enum PlatformEvent {
     Resized(WindowSize),
 }
 
-/// Collects the window events a manual test loop reacts to.
-#[cfg(test)]
 struct EventRecorder {
-    events: Rc<RefCell<Vec<PlatformEvent>>>,
+    window_id: Option<WindowId>,
+    events: Vec<PlatformEvent>,
 }
 
-#[cfg(test)]
+impl EventRecorder {
+    fn record(&mut self, window_id: WindowId, event: WindowEvent) {
+        if self.window_id == Some(window_id) {
+            match event {
+                WindowEvent::CloseRequested => self.events.push(PlatformEvent::CloseRequested),
+                WindowEvent::Resized(size) => self.events.push(PlatformEvent::Resized(
+                    WindowSize::new(size.width, size.height),
+                )),
+                _ => {}
+            }
+        }
+    }
+}
+
 impl ApplicationHandler for EventRecorder {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
 
     fn window_event(
         &mut self,
         _event_loop: &ActiveEventLoop,
-        _window_id: WindowId,
+        window_id: WindowId,
         event: WindowEvent,
     ) {
-        match event {
-            WindowEvent::CloseRequested => {
-                self.events.borrow_mut().push(PlatformEvent::CloseRequested);
-            }
-            WindowEvent::Resized(size) => {
-                self.events
-                    .borrow_mut()
-                    .push(PlatformEvent::Resized(WindowSize::new(
-                        size.width,
-                        size.height,
-                    )));
-            }
-            _ => {}
-        }
+        self.record(window_id, event);
     }
 }
 
@@ -390,7 +380,8 @@ mod tests {
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     #[test]
     #[ignore = "requires a desktop display and a presentation-capable GPU; opens a window and spins until closed"]
-    fn native_surface_draws_indexed_meshes() -> Result<(), Box<dyn std::error::Error>> {
+    fn native_surface_draws_indexed_meshes() -> core::result::Result<(), Box<dyn std::error::Error>>
+    {
         #[cfg(target_os = "windows")]
         use winit::platform::windows::EventLoopBuilderExtWindows;
         #[cfg(target_os = "linux")]
@@ -405,10 +396,10 @@ mod tests {
         use crate::resources::library::BuiltinMesh;
         use crate::resources::manager::ResourceManager;
 
-        let event_loop = EventLoop::builder().with_any_thread(true).build()?;
-        let mut platform = PlatformAdapter::create_window(
+        let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
+        let platform = PlatformAdapter::create_window(
             WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
-            event_loop,
+            &mut event_loop,
         )?;
         platform.set_fullscreen(true);
         let mut backend = WgpuRenderSystem::new();
@@ -425,7 +416,7 @@ mod tests {
         let mut angle = 0.0_f32;
         let mut running = true;
         while running {
-            for event in platform.pump_once(Some(Duration::from_millis(16))) {
+            for event in platform.pump_events(&mut event_loop, Some(Duration::from_millis(16))) {
                 if let PlatformEvent::CloseRequested = event {
                     running = false;
                 }
@@ -510,5 +501,54 @@ mod tests {
         let (device, _queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default())).ok()?;
         Some(device)
+    }
+}
+
+#[cfg(test)]
+mod event_tests {
+    use super::*;
+
+    #[test]
+    fn recorder_preserves_resize_and_close_order() {
+        let window_id = WindowId::from(1);
+        let mut recorder = EventRecorder {
+            window_id: Some(window_id),
+            events: Vec::new(),
+        };
+        recorder.record(window_id, WindowEvent::Resized(PhysicalSize::new(0, 600)));
+        recorder.record(window_id, WindowEvent::CloseRequested);
+        assert_eq!(
+            recorder.events,
+            [
+                PlatformEvent::Resized(WindowSize::new(0, 600)),
+                PlatformEvent::CloseRequested
+            ]
+        );
+    }
+
+    #[test]
+    fn recorder_ignores_events_from_other_sessions() {
+        let mut recorder = EventRecorder {
+            window_id: Some(WindowId::from(1)),
+            events: Vec::new(),
+        };
+        recorder.record(WindowId::from(2), WindowEvent::CloseRequested);
+        recorder.record(
+            WindowId::from(2),
+            WindowEvent::Resized(PhysicalSize::new(800, 600)),
+        );
+        assert!(recorder.events.is_empty());
+    }
+
+    #[test]
+    fn recorder_ignores_input_and_redraw_events() {
+        let window_id = WindowId::from(1);
+        let mut recorder = EventRecorder {
+            window_id: Some(window_id),
+            events: Vec::new(),
+        };
+        recorder.record(window_id, WindowEvent::Focused(true));
+        recorder.record(window_id, WindowEvent::RedrawRequested);
+        assert!(recorder.events.is_empty());
     }
 }

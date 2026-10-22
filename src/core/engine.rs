@@ -1,15 +1,15 @@
 //! Engine facade and orchestrator.
 
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use winit::event_loop::EventLoop;
 
 use crate::core::api::EngineApi;
-use crate::core::engine_loop::{EngineEvent, EngineLoop};
+use crate::core::engine_loop::{EngineEvent, EngineLoop, FrameClock, InternalEvent};
 use crate::core::error::EngineError;
 use crate::platform::{
-    PlatformAdapter, PlatformError, WindowDescriptor, WindowSize, new_event_loop,
+    PlatformAdapter, PlatformError, PlatformEvent, WindowDescriptor, WindowSize, new_event_loop,
     validate_window_size,
 };
 use crate::scene::api::SceneApi;
@@ -22,8 +22,8 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 /// renderer, window and the frame lifecycle.
 ///
 /// The current skeleton supports construction, scene access and frame handler
-/// registration, window creation and GPU initialization. The main loop is not
-/// implemented yet; loop startup reports this limitation through an error.
+/// registration, window creation and GPU initialization. The main loop calls
+/// frame handlers and presents frames until the window closes or an error occurs.
 ///
 /// A session is the interval between [`EngineApi::initialize`] and
 /// [`EngineApi::shutdown`]. The engine itself, its event loop and its scene
@@ -35,6 +35,8 @@ pub struct Engine {
     platform: Option<PlatformAdapter>,
     winit_loop: Option<EventLoop<()>>,
 }
+
+const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 impl Engine {
     /// Creates the engine; the parts are assembled by `systems::lifecycle`.
@@ -67,14 +69,79 @@ impl Engine {
         }
     }
 
-    #[allow(dead_code)] // driven by EngineLoop (milestone 2)
-    fn update(&mut self, _dt: Duration) -> Result<(), EngineError> {
-        todo!("milestone 2")
+    fn frame_pass(
+        &mut self,
+        size: WindowSize,
+        clock: &mut FrameClock,
+        now: &mut impl FnMut() -> Instant,
+    ) -> Result<(), EngineError> {
+        clock.begin_frame(now());
+        for event in self.event_loop.callbacks() {
+            (event.frame_started)(&mut self.parts.scene, &clock.event_time(now()))?;
+        }
+        let frame = self.parts.scene.build_render_frame(size);
+        self.parts.renderer.render(&frame, &self.parts.resources)?;
+        for event in self.event_loop.callbacks() {
+            (event.frame_ended)(&mut self.parts.scene, &clock.event_time(now()))?;
+        }
+        Ok(())
     }
 
-    #[allow(dead_code)] // driven by EngineLoop (milestone 2)
-    fn render(&mut self) -> Result<(), EngineError> {
-        todo!("milestone 2")
+    fn run_with_events(
+        &mut self,
+        mut pump: impl FnMut(&mut Self, Duration) -> Result<Vec<PlatformEvent>, EngineError>,
+        mut now: impl FnMut() -> Instant,
+    ) -> Result<(), EngineError> {
+        let size = self
+            .platform
+            .as_ref()
+            .ok_or(EngineError::NotInitialized)?
+            .window()
+            .size();
+        self.event_loop.stop();
+        self.event_loop.set_running(true);
+        let result = self.drive_loop(size, &mut pump, &mut now);
+        self.event_loop.stop();
+        result
+    }
+
+    fn drive_loop(
+        &mut self,
+        mut size: WindowSize,
+        pump: &mut impl FnMut(&mut Self, Duration) -> Result<Vec<PlatformEvent>, EngineError>,
+        now: &mut impl FnMut() -> Instant,
+    ) -> Result<(), EngineError> {
+        let mut clock = FrameClock::new(now());
+        let mut timeout = Duration::ZERO;
+        while self.event_loop.is_running() {
+            let events = pump(self, timeout)?;
+            let iteration_started = now();
+            for event in events {
+                self.event_loop.push_internal(match event {
+                    PlatformEvent::Resized(size) => InternalEvent::WindowResized(size),
+                    PlatformEvent::CloseRequested => InternalEvent::WindowClosed,
+                });
+            }
+            self.event_loop.push_internal(InternalEvent::Tick);
+            while let Some(event) = self.event_loop.next_internal() {
+                match event {
+                    InternalEvent::Tick => {
+                        if size.width != 0 && size.height != 0 {
+                            self.frame_pass(size, &mut clock, now)?;
+                        }
+                    }
+                    InternalEvent::WindowResized(new_size) => {
+                        self.parts.renderer.set_window_size(new_size)?;
+                        size = new_size;
+                    }
+                    InternalEvent::WindowClosed => {
+                        self.event_loop.stop();
+                    }
+                }
+            }
+            timeout = FRAME_INTERVAL.saturating_sub(now().duration_since(iteration_started));
+        }
+        Ok(())
     }
 }
 
@@ -97,12 +164,20 @@ impl EngineApi for Engine {
     }
 
     fn run(&mut self) -> Result<(), EngineError> {
-        if self.platform.is_none() {
-            Err(EngineError::NotInitialized)
-        } else {
-            // TODO(issue #15): implement the main loop and frame event delivery.
-            Err(EngineError::RunUnavailable)
-        }
+        self.run_with_events(
+            |engine, timeout| {
+                let platform = engine
+                    .platform
+                    .as_ref()
+                    .ok_or(EngineError::NotInitialized)?;
+                let event_loop = engine
+                    .winit_loop
+                    .as_mut()
+                    .ok_or(EngineError::Platform(PlatformError::MissingEventLoop))?;
+                Ok(platform.pump_events(event_loop, Some(timeout)))
+            },
+            Instant::now,
+        )
     }
 
     fn add_event(&mut self, event: EngineEvent) -> Result<(), EngineError> {
@@ -114,6 +189,7 @@ impl EngineApi for Engine {
         if self.platform.is_none() {
             Err(EngineError::NotInitialized)
         } else {
+            self.event_loop.stop();
             lifecycle::shutdown(&mut self.parts)?;
             self.platform = None;
             Ok(())
@@ -163,381 +239,4 @@ impl EngineApi for Engine {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::RefCell;
-    use std::rc::Rc;
-
-    use crate::math::Vec3;
-    use crate::platform::Window;
-    use crate::render::frame::RenderFrame;
-    use crate::render::renderer::Renderer;
-    use crate::render::stats::RenderStats;
-    use crate::render::system::{RenderError, RenderSystem};
-    use crate::resources::library::{BuiltinMesh, MeshLibrary};
-    use crate::resources::manager::ResourceManager;
-    use crate::scene::transform::Transform;
-
-    use super::*;
-
-    const BACKEND_FAILURE: &str = "test backend failure";
-    const TEST_WINDOW_TITLE: &str = "Engine lifecycle test";
-    const TEST_SIZE: WindowSize = WindowSize {
-        width: 800,
-        height: 600,
-    };
-
-    #[derive(Default)]
-    struct BackendState {
-        initialized: bool,
-        fail_initialize: bool,
-        fail_resize: bool,
-        size: Option<WindowSize>,
-        shutdown_count: usize,
-    }
-
-    struct TestRenderSystem(Rc<RefCell<BackendState>>);
-
-    impl RenderSystem for TestRenderSystem {
-        fn initialize(&mut self, _window: &Window) -> Result<(), RenderError> {
-            let mut state = self.0.borrow_mut();
-            if state.fail_initialize {
-                Err(RenderError::Initialization(BACKEND_FAILURE.to_owned()))
-            } else {
-                state.initialized = true;
-                Ok(())
-            }
-        }
-
-        fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
-            let mut state = self.0.borrow_mut();
-            if state.fail_resize {
-                Err(RenderError::Render(BACKEND_FAILURE.to_owned()))
-            } else {
-                state.size = Some(size);
-                Ok(())
-            }
-        }
-
-        fn render(
-            &mut self,
-            _frame: &RenderFrame,
-            _resources: &ResourceManager,
-        ) -> Result<RenderStats, RenderError> {
-            Ok(RenderStats::default())
-        }
-
-        fn shutdown(&mut self) {
-            self.0.borrow_mut().shutdown_count += 1;
-        }
-    }
-
-    fn engine_with_backend() -> (Engine, Rc<RefCell<BackendState>>) {
-        let state = Rc::new(RefCell::new(BackendState::default()));
-        let mut engine = Engine::new();
-        engine.parts.renderer = Renderer::new(Box::new(TestRenderSystem(Rc::clone(&state))));
-        (engine, state)
-    }
-
-    #[test]
-    fn initialization_delegates_to_backend_before_committing_platform() {
-        let (mut engine, state) = engine_with_backend();
-
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        assert!(state.borrow().initialized);
-        assert!(engine.platform.is_some());
-    }
-
-    #[test]
-    fn backend_initialization_failure_preserves_uninitialized_state_and_cause() {
-        let (mut engine, state) = engine_with_backend();
-        state.borrow_mut().fail_initialize = true;
-
-        let result = engine.initialize_platform(PlatformAdapter::for_test(TEST_SIZE));
-
-        assert!(matches!(result,
-            Err(EngineError::Lifecycle(lifecycle::LifecycleError::Render(
-                RenderError::Initialization(message)
-            ))) if message == BACKEND_FAILURE
-        ));
-        assert!(engine.platform.is_none());
-
-        state.borrow_mut().fail_initialize = false;
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("a failed initialization leaves the engine available for retry");
-    }
-
-    #[test]
-    fn initialized_engine_rejects_reinitialization() {
-        let (mut engine, _) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        assert!(matches!(
-            engine.initialize(WindowDescriptor::new(TEST_WINDOW_TITLE, 800, 600)),
-            Err(EngineError::AlreadyInitialized)
-        ));
-    }
-
-    #[test]
-    fn resize_delegates_requested_size_to_backend() {
-        let (mut engine, state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-        let size = WindowSize::new(1280, 720);
-
-        engine
-            .set_window_size(size)
-            .expect("the test platform and backend accept resizing");
-
-        assert_eq!(state.borrow().size, Some(size));
-    }
-
-    #[test]
-    fn resize_preserves_backend_error_cause() {
-        let (mut engine, state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-        state.borrow_mut().fail_resize = true;
-
-        assert!(matches!(engine.set_window_size(WindowSize::new(1280, 720)),
-            Err(EngineError::Render(RenderError::Render(message))) if message == BACKEND_FAILURE
-        ));
-        assert_eq!(
-            engine
-                .platform
-                .as_ref()
-                .map(|platform| platform.window().size()),
-            Some(TEST_SIZE)
-        );
-    }
-
-    #[test]
-    fn invalid_resize_does_not_change_backend_or_window() {
-        let (mut engine, state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        assert!(matches!(
-            engine.set_window_size(WindowSize::new(0, 600)),
-            Err(EngineError::Platform(
-                crate::platform::PlatformError::InvalidWindowSize(_)
-            ))
-        ));
-        assert_eq!(state.borrow().size, None);
-        assert_eq!(
-            engine
-                .platform
-                .as_ref()
-                .map(|platform| platform.window().size()),
-            Some(TEST_SIZE)
-        );
-    }
-
-    #[test]
-    fn shutdown_releases_platform_and_calls_backend_once() {
-        let (mut engine, state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        engine
-            .shutdown()
-            .expect("the test backend supports shutdown");
-
-        assert!(engine.platform.is_none());
-        assert!(matches!(
-            engine.shutdown(),
-            Err(EngineError::NotInitialized)
-        ));
-        assert_eq!(state.borrow().shutdown_count, 1);
-    }
-
-    #[test]
-    fn event_registration_retains_handlers_without_calling_them() {
-        let mut engine = Engine::new();
-        let calls = Rc::new(RefCell::new(Vec::new()));
-
-        for index in 0..2 {
-            let started = Rc::clone(&calls);
-            let ended = Rc::clone(&calls);
-            engine
-                .add_event(EngineEvent {
-                    frame_started: Box::new(move |_, _| {
-                        started.borrow_mut().push((index, true));
-                        Ok(())
-                    }),
-                    frame_ended: Box::new(move |_, _| {
-                        ended.borrow_mut().push((index, false));
-                        Ok(())
-                    }),
-                })
-                .expect("frame handlers can be registered before initialization");
-        }
-
-        assert!(calls.borrow().is_empty());
-        let time = crate::core::engine_loop::EventTime {
-            time_since_last_event: 0.0,
-            time_since_last_frame: 0.0,
-        };
-        for event in engine.event_loop.callbacks() {
-            (event.frame_started)(&mut engine.parts.scene, &time)
-                .expect("the registered test handler succeeds");
-            (event.frame_ended)(&mut engine.parts.scene, &time)
-                .expect("the registered test handler succeeds");
-        }
-        assert_eq!(
-            *calls.borrow(),
-            [(0, true), (0, false), (1, true), (1, false)]
-        );
-    }
-
-    #[test]
-    fn invalid_window_size_fails_before_event_loop_acquisition() {
-        let mut engine = Engine::new();
-
-        assert!(matches!(
-            engine.initialize(WindowDescriptor::new(TEST_WINDOW_TITLE, 0, 600)),
-            Err(EngineError::Platform(
-                crate::platform::PlatformError::InvalidWindowSize(_)
-            ))
-        ));
-        assert!(engine.winit_loop.is_none());
-    }
-
-    #[test]
-    fn scene_survives_save_shutdown_reinitialize_and_restore() {
-        let (mut engine, _state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        let root = engine.parts.scene.root_node();
-        let child = engine
-            .parts
-            .scene
-            .create_node(root)
-            .expect("the root node exists");
-        engine
-            .parts
-            .scene
-            .set_node_transform(
-                child,
-                Transform::from_translation(Vec3::new(0.0, 0.0, -5.0)),
-            )
-            .expect("the created node exists");
-        let mesh = engine
-            .parts
-            .resources
-            .add_mesh(MeshLibrary::build(BuiltinMesh::Cube));
-        let object = engine
-            .parts
-            .scene
-            .create_object(mesh, child)
-            .expect("the created node exists");
-
-        let before = engine.parts.scene.build_render_frame(TEST_SIZE);
-        engine.save_scene().expect("in-memory save cannot fail");
-        engine
-            .shutdown()
-            .expect("the test backend supports shutdown");
-
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("reinitialization succeeds for the test backend");
-        assert!(engine.parts.scene.objects().is_empty());
-
-        engine
-            .restore_scene()
-            .expect("restore succeeds into an empty scene");
-        let after = engine.parts.scene.build_render_frame(TEST_SIZE);
-        assert_eq!(before.camera, after.camera);
-        assert_eq!(before.items, after.items);
-        assert!(
-            engine
-                .parts
-                .scene
-                .objects()
-                .get(object.0 as usize)
-                .is_some()
-        );
-        let expected = MeshLibrary::build(BuiltinMesh::Cube);
-        assert_eq!(engine.parts.resources.mesh(mesh), Some(&expected));
-    }
-
-    #[test]
-    fn restore_rejects_non_empty_scene_without_prior_save() {
-        let (mut engine, _state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        let root = engine.parts.scene.root_node();
-        let mesh = engine
-            .parts
-            .resources
-            .add_mesh(MeshLibrary::build(BuiltinMesh::Cube));
-        engine
-            .parts
-            .scene
-            .create_object(mesh, root)
-            .expect("the root node exists");
-
-        assert!(matches!(
-            engine.restore_scene(),
-            Err(ScenePersistenceError::SceneNotEmpty)
-        ));
-    }
-
-    #[test]
-    fn restore_without_save_into_empty_scene_is_a_noop() {
-        let (mut engine, _state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-
-        assert!(engine.restore_scene().is_ok());
-        assert!(engine.parts.scene.objects().is_empty());
-        assert!(engine.parts.scene.nodes().len() == 1);
-    }
-
-    #[test]
-    fn store_and_frame_handlers_survive_shutdown_and_reinitialization() {
-        let (mut engine, _state) = engine_with_backend();
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("the test backend accepts initialization");
-        engine
-            .parts
-            .resources
-            .add_mesh(MeshLibrary::build(BuiltinMesh::Cube));
-        engine.save_scene().expect("in-memory save cannot fail");
-        let registered = engine.event_loop.callbacks().len();
-        engine
-            .add_event(EngineEvent {
-                frame_started: Box::new(|_, _| Ok(())),
-                frame_ended: Box::new(|_, _| Ok(())),
-            })
-            .expect("frame handlers can be registered before initialization");
-
-        engine
-            .shutdown()
-            .expect("the test backend supports shutdown");
-        engine
-            .initialize_platform(PlatformAdapter::for_test(TEST_SIZE))
-            .expect("reinitialization succeeds for the test backend");
-
-        assert_eq!(engine.event_loop.callbacks().len(), registered + 1);
-        engine
-            .restore_scene()
-            .expect("restore succeeds into an empty scene");
-        assert_eq!(engine.parts.resources.meshes().len(), 1);
-    }
-}
+mod tests;
