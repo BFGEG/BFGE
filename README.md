@@ -53,15 +53,13 @@ cargo run --locked --example rotating_model
 сворачивать и восстанавливать его; закрытие окна завершает цикл и вызывает
 освобождение движка в примере.
 
-Другие способы запуска:
+Запуск с собственной моделью:
 
 ```bash
-cargo run --locked --example minimal
 cargo run --locked --example rotating_model -- path/to/model.gltf
 ```
 
-[`minimal`](examples/minimal.rs) открывает пустую сцену и показывает полный
-жизненный цикл. [`rotating_model`](examples/rotating_model.rs) загружает OBJ,
+[`rotating_model`](examples/rotating_model.rs) загружает OBJ,
 glTF или GLB и изменяет преобразование узла в `frame_started`. Пути аргументов
 отсчитываются от текущего рабочего каталога. Масштаб модели и точку обзора
 при необходимости настраивает клиент. На Linux с доступным X11 и некорректным
@@ -116,7 +114,6 @@ cargo doc --no-deps --all-features --locked
 Rustdoc появится в `target/doc/BFGE/index.html`; для открытия браузером используйте
 `cargo doc --no-deps --open`. Обычный набор тестов пропускает оконные тесты.
 Команды отдельных проверок окна/GPU и ручной сценарий описаны в
-[руководстве пользователя](docs/User_Guide.md#проверка-окна-и-gpu) и
 [описании backend](docs/Wgpu_Backend.md#проверка-настоящей-поверхности).
 
 ## Документация
