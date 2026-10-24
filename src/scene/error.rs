@@ -15,4 +15,10 @@ pub enum SceneError {
     /// A node cannot be moved into its own descendant.
     #[error("invalid reparent: a node cannot be moved into its own descendant")]
     InvalidReparent,
+    /// The directional light must have a finite, normalizable direction.
+    #[error("light direction must be finite and normalizable")]
+    InvalidLightDirection,
+    /// Light colors must contain finite, nonnegative components.
+    #[error("light colors must be finite and nonnegative")]
+    InvalidLightColor,
 }

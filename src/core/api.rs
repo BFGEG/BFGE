@@ -20,7 +20,7 @@ pub trait EngineApi {
     ///
     /// The window is created by the engine; the client does not manage the
     /// windowing or graphics platform. The initial scene contains a root node
-    /// and a viewpoint with default values, but no scene objects.
+    /// and a viewpoint and lighting with default values, but no scene objects.
     fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError>;
 
     /// Runs the engine's main loop until the window is closed.
@@ -54,7 +54,8 @@ pub trait EngineApi {
     /// a new object, including repeated loads of the same file.
     /// Supports `.gltf`, `.glb` and `.obj`; parts share the first explicit color
     /// on used geometry, or neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
-    /// Textures and lighting are ignored. This operation requires no window.
+    /// Textures and model-provided normals are ignored. Scene lighting is
+    /// applied when the model is rendered. This operation requires no window.
     ///
     /// # Errors
     ///

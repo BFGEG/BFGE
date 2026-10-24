@@ -7,6 +7,7 @@ use crate::math::Vec3;
 use crate::resources::library::{BuiltinMesh, MeshLibrary};
 use crate::resources::manager::ResourceManager;
 use crate::scene::api::SceneApi;
+use crate::scene::lighting::{DirectionalLight, SceneLighting};
 
 const EPSILON: f32 = 1e-5;
 const WINDOW: WindowSize = WindowSize {
@@ -277,6 +278,56 @@ fn set_viewpoint_replaces_the_state() {
         .expect("the scene accepts a valid viewpoint");
 
     assert_eq!(scene.viewpoint(), viewpoint);
+}
+
+#[test]
+fn lighting_change_appears_in_the_next_render_frame() {
+    let mut scene = SceneManager::new();
+    let lighting = SceneLighting {
+        ambient: Vec3::splat(0.1),
+        directional: DirectionalLight {
+            direction: Vec3::X,
+            color: Vec3::new(1.0, 0.5, 0.25),
+        },
+    };
+
+    scene.set_lighting(lighting).expect("the lighting is valid");
+
+    assert_eq!(scene.lighting(), lighting);
+    assert_eq!(scene.build_render_frame(WINDOW).lighting, lighting);
+}
+
+#[test]
+fn invalid_lighting_keeps_the_previous_state() {
+    let mut scene = SceneManager::new();
+    let original = scene.lighting();
+    let invalid = SceneLighting {
+        directional: DirectionalLight {
+            direction: Vec3::ZERO,
+            ..original.directional
+        },
+        ..original
+    };
+
+    assert!(matches!(
+        scene.set_lighting(invalid),
+        Err(SceneError::InvalidLightDirection)
+    ));
+    assert_eq!(scene.lighting(), original);
+}
+
+#[test]
+fn negative_light_color_is_rejected() {
+    let mut scene = SceneManager::new();
+    let invalid = SceneLighting {
+        ambient: Vec3::new(-0.1, 0.0, 0.0),
+        ..SceneLighting::default()
+    };
+
+    assert!(matches!(
+        scene.set_lighting(invalid),
+        Err(SceneError::InvalidLightColor)
+    ));
 }
 
 #[test]

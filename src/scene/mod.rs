@@ -3,6 +3,7 @@
 pub mod api;
 pub mod error;
 pub mod ids;
+pub mod lighting;
 pub mod manager;
 pub mod node;
 pub mod object;

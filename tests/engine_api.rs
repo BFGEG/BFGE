@@ -1,4 +1,8 @@
-use BFGE::{Engine, EngineApi, EngineError, ViewpointState, WindowDescriptor, WindowSize};
+use BFGE::math::Vec3;
+use BFGE::{
+    DirectionalLight, Engine, EngineApi, EngineError, SceneLighting, ViewpointState,
+    WindowDescriptor, WindowSize,
+};
 
 #[test]
 fn new_engine_exposes_default_viewpoint() {
@@ -21,6 +25,25 @@ fn scene_changes_are_retained_through_the_engine_api() {
         .expect("the scene accepts a valid perspective viewpoint");
 
     assert_eq!(engine.scene().viewpoint(), viewpoint);
+}
+
+#[test]
+fn engine_scene_exposes_mutable_lighting() {
+    let mut engine = Engine::new();
+    let lighting = SceneLighting {
+        ambient: Vec3::splat(0.2),
+        directional: DirectionalLight {
+            direction: Vec3::NEG_Y,
+            color: Vec3::new(0.8, 0.7, 0.6),
+        },
+    };
+
+    engine
+        .scene()
+        .set_lighting(lighting)
+        .expect("the lighting is valid");
+
+    assert_eq!(engine.scene().lighting(), lighting);
 }
 
 #[test]

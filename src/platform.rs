@@ -337,6 +337,7 @@ mod tests {
         use crate::render::stats::RenderStats;
         use crate::render::system::RenderSystem;
         use crate::resources::manager::ResourceManager;
+        use crate::scene::lighting::SceneLighting;
 
         let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
         let mut platform = PlatformAdapter::create_window(
@@ -350,6 +351,7 @@ mod tests {
                 view: Mat4::IDENTITY,
                 projection: Mat4::IDENTITY,
             },
+            lighting: SceneLighting::default(),
             items: Vec::new(),
         };
 
@@ -395,6 +397,7 @@ mod tests {
         use crate::render::system::RenderSystem;
         use crate::resources::library::BuiltinMesh;
         use crate::resources::manager::ResourceManager;
+        use crate::scene::lighting::SceneLighting;
 
         let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
         let platform = PlatformAdapter::create_window(
@@ -447,6 +450,7 @@ mod tests {
             angle = (angle + 0.02) % TAU;
             let frame = RenderFrame {
                 camera,
+                lighting: SceneLighting::default(),
                 items: items
                     .iter()
                     .map(|(offset, axis)| RenderItem {
