@@ -17,18 +17,42 @@ pub enum RenderError {
     Render(String),
 }
 
-/// Graphics system interface (the backend replacement point).
+/// Interface implemented by a graphics backend.
+///
+/// The renderer calls these methods over a window session: initialize once,
+/// apply size changes as they arrive, render frames, then shut down.
+/// Implementations own their backend-specific graphics resources.
 pub trait RenderSystem {
-    /// # Errors - [`RenderError::Initialization`].
+    /// Initializes backend resources for the engine window.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError::Initialization`] if the backend cannot be set up.
     fn initialize(&mut self, window: &Window) -> Result<(), RenderError>;
-    /// # Errors - [`RenderError`].
+    /// Applies the current window size to the backend surface.
+    ///
+    /// A zero width or height suspends rendering until a drawable size is
+    /// received.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] if the backend cannot apply the size.
     fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError>;
-    /// # Errors - [`RenderError`].
+    /// Renders and presents a frame using geometry from `resources`.
+    ///
+    /// Return zeroed statistics if the surface temporarily cannot present a
+    /// frame.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RenderError`] if rendering fails or a referenced mesh cannot
+    /// be resolved.
     fn render(
         &mut self,
         frame: &RenderFrame,
         resources: &ResourceManager,
     ) -> Result<RenderStats, RenderError>;
-    /// Shuts the graphics system down.
+    /// Releases backend resources and returns the implementation to its
+    /// uninitialized state.
     fn shutdown(&mut self);
 }

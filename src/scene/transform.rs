@@ -2,14 +2,14 @@
 
 use crate::math::{Mat4, Quat, Vec3};
 
-/// Position, rotation and scale.
+/// Translation, rotation and scale relative to a scene node's parent.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
-    /// Translation.
+    /// Translation in scene units.
     pub translation: Vec3,
-    /// Rotation.
+    /// Rotation as a quaternion.
     pub rotation: Quat,
-    /// Scale.
+    /// Per-axis scale factor.
     pub scale: Vec3,
 }
 
@@ -56,8 +56,8 @@ impl Transform {
         }
     }
 
-    /// Local transform matrix.
-    #[allow(dead_code)] // used by [SCN] build_render_frame (milestone 2)
+    /// Builds a matrix applying scale, then rotation, then translation.
+    #[allow(dead_code)]
     pub(crate) fn matrix(&self) -> Mat4 {
         Mat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation)
     }

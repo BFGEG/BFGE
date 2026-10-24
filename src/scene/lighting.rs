@@ -12,7 +12,7 @@ pub struct DirectionalLight {
     pub color: Vec3,
 }
 
-/// Constant ambient light and one directional light for the whole scene.
+/// Constant ambient light and one directional light shared by the scene.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SceneLighting {
     /// Linear RGB ambient intensity applied to every surface.

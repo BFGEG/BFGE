@@ -18,12 +18,11 @@ use crate::systems::lifecycle::{self, EngineParts};
 use crate::systems::loading::{self, ModelLoadError};
 use crate::systems::persistence::{self, ScenePersistenceError};
 
-/// Engine facade and orchestrator: links the scene, resources, systems,
-/// renderer, window and the frame lifecycle.
+/// Main entry point for creating and running an engine session.
 ///
-/// The current skeleton supports construction, scene access and frame handler
-/// registration, window creation and GPU initialization. The main loop calls
-/// frame handlers and presents frames until the window closes or an error occurs.
+/// The engine owns the scene, its model resources, frame handlers and graphics
+/// system. It creates a window during initialization and drives frame updates
+/// until the window closes or an error occurs.
 ///
 /// A session is the interval between [`EngineApi::initialize`] and
 /// [`EngineApi::shutdown`]. The engine itself, its event loop and its scene
@@ -39,7 +38,10 @@ pub struct Engine {
 const FRAME_INTERVAL: Duration = Duration::from_nanos(1_000_000_000 / 60);
 
 impl Engine {
-    /// Creates the engine; the parts are assembled by `systems::lifecycle`.
+    /// Creates an engine with an empty scene and default viewpoint and lighting.
+    ///
+    /// The scene can be configured and models can be loaded before a window is
+    /// opened.
     pub fn new() -> Self {
         Self {
             parts: lifecycle::create(),

@@ -4,18 +4,18 @@ use crate::math::Mat4;
 use crate::resources::handle::MeshHandle;
 use crate::scene::lighting::SceneLighting;
 
-/// Display frame - the data boundary between the scene and the renderer.
+/// Scene state prepared for one rendering pass.
 #[derive(Debug, Clone)]
 pub struct RenderFrame {
-    /// Frame camera.
+    /// View and projection matrices for the frame.
     pub camera: RenderCamera,
-    /// Ambient and directional light for this frame.
+    /// Ambient and directional lighting for the frame.
     pub lighting: SceneLighting,
-    /// Frame items.
+    /// Objects to draw, each with its scene transform and mesh identifier.
     pub items: Vec<RenderItem>,
 }
 
-/// Frame camera: ready view/projection matrices.
+/// Camera data in matrix form, ready for the rendering backend.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderCamera {
     /// View matrix (world -> view).
@@ -24,11 +24,11 @@ pub struct RenderCamera {
     pub projection: Mat4,
 }
 
-/// A single frame item.
+/// One scene object prepared for drawing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderItem {
-    /// World transform matrix.
+    /// Object transform in scene coordinates.
     pub world_transform: Mat4,
-    /// Object's geometry.
+    /// Identifier of the object's geometry resource.
     pub mesh: MeshHandle,
 }

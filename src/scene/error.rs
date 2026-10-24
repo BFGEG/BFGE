@@ -12,8 +12,8 @@ pub enum SceneError {
     /// Unknown scene object.
     #[error("unknown scene object: {0:?}")]
     UnknownObject(SceneObjectId),
-    /// A node cannot be moved into its own descendant.
-    #[error("invalid reparent: a node cannot be moved into its own descendant")]
+    /// An invalid reparenting operation reported by a scene callback.
+    #[error("invalid reparenting operation")]
     InvalidReparent,
     /// The directional light must have a finite, normalizable direction.
     #[error("light direction must be finite and normalizable")]

@@ -20,7 +20,10 @@ const WINDOW_BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(test)]
 const TEST_WINDOW_UNAVAILABLE: &str = "the test window has no native window handle";
 
-/// Window size in pixels.
+/// Window size in physical pixels.
+///
+/// A zero dimension can represent a minimized window. Explicit sizes passed to
+/// engine initialization and resizing must have nonzero dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WindowSize {
     /// Width in pixels.
@@ -30,13 +33,13 @@ pub struct WindowSize {
 }
 
 impl WindowSize {
-    /// Creates a window size.
+    /// Creates a window size in physical pixels.
     pub fn new(width: u32, height: u32) -> Self {
         Self { width, height }
     }
 }
 
-/// Parameters of the window created by the engine.
+/// Title and initial physical dimensions for the engine window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WindowDescriptor {
     /// Window title.
@@ -46,7 +49,7 @@ pub struct WindowDescriptor {
 }
 
 impl WindowDescriptor {
-    /// Creates a window descriptor.
+    /// Creates a window descriptor from a title and physical dimensions.
     pub fn new(title: &str, width: u32, height: u32) -> Self {
         Self {
             title: title.to_owned(),
