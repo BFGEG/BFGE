@@ -3,10 +3,12 @@
 use std::num::NonZeroU64;
 
 use bytemuck::{Pod, Zeroable};
+use glam::Mat3;
 
 use super::buffer::GpuVertex;
 use super::texture::DEPTH_FORMAT;
 use crate::math::Mat4;
+use crate::scene::lighting::SceneLighting;
 
 const MESH_SHADER: wgpu::ShaderModuleDescriptor<'_> = wgpu::include_wgsl!("shaders/mesh.wgsl");
 const PIPELINE_LABEL: &str = "BFGE mesh pipeline";
@@ -20,12 +22,16 @@ const MESH_BUFFER_INITIAL_CAPACITY: u32 = 1;
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct CameraUniform {
     view_proj: [[f32; 4]; 4],
+    ambient: [f32; 4],
+    light_direction: [f32; 4],
+    light_color: [f32; 4],
 }
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Pod, Zeroable)]
 struct MeshUniform {
     world: [[f32; 4]; 4],
+    normal_matrix: [[f32; 4]; 3],
     color: [f32; 4],
 }
 
@@ -97,9 +103,22 @@ impl MeshPipeline {
         &self.pipeline
     }
 
-    pub(crate) fn write_camera(&self, queue: &wgpu::Queue, view_proj: Mat4) {
+    pub(crate) fn write_camera(
+        &self,
+        queue: &wgpu::Queue,
+        view_proj: Mat4,
+        lighting: SceneLighting,
+    ) {
         let uniform = CameraUniform {
             view_proj: view_proj.to_cols_array_2d(),
+            ambient: lighting.ambient.extend(0.0).to_array(),
+            light_direction: lighting
+                .directional
+                .direction
+                .normalize_or_zero()
+                .extend(0.0)
+                .to_array(),
+            light_color: lighting.directional.color.extend(0.0).to_array(),
         };
         queue.write_buffer(&self.camera_buffer, 0, bytemuck::bytes_of(&uniform));
     }
@@ -116,11 +135,25 @@ impl MeshPipeline {
     pub(crate) fn write_mesh(&self, queue: &wgpu::Queue, index: u32, world: Mat4, color: [f32; 4]) {
         let uniform = MeshUniform {
             world: world.to_cols_array_2d(),
+            normal_matrix: normal_matrix(world),
             color,
         };
         let offset = u64::from(index) * u64::from(self.mesh_stride);
         queue.write_buffer(&self.mesh_buffer, offset, bytemuck::bytes_of(&uniform));
     }
+}
+
+fn normal_matrix(world: Mat4) -> [[f32; 4]; 3] {
+    let linear = Mat3::from_mat4(world);
+    let determinant = linear.determinant();
+    let matrix = if determinant.is_finite() && determinant != 0.0 {
+        linear.inverse().transpose()
+    } else {
+        Mat3::ZERO
+    };
+    matrix
+        .to_cols_array_2d()
+        .map(|column| [column[0], column[1], column[2], 0.0])
 }
 
 fn camera_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -159,7 +192,7 @@ fn create_mesh_bind_group(
 fn uniform_entry(binding: u32, dynamic: bool) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
-        visibility: wgpu::ShaderStages::VERTEX,
+        visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: dynamic,
@@ -246,25 +279,42 @@ fn mesh_stride(alignment: u32, size: usize) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::math::Vec3;
 
     const MESH_WGSL: &str = include_str!("shaders/mesh.wgsl");
 
     #[test]
     fn uniforms_are_padded_to_vec4_boundaries() {
-        assert_eq!(size_of::<MeshUniform>(), 80);
-        assert_eq!(size_of::<CameraUniform>(), 64);
+        assert_eq!(size_of::<MeshUniform>(), 128);
+        assert_eq!(size_of::<CameraUniform>(), 112);
     }
 
     #[test]
     fn mesh_stride_rounds_up_to_alignment() {
-        assert_eq!(mesh_stride(256, 80), 256);
-        assert_eq!(mesh_stride(64, 80), 128);
-        assert_eq!(mesh_stride(80, 80), 80);
+        assert_eq!(mesh_stride(256, 128), 256);
+        assert_eq!(mesh_stride(64, 128), 128);
+        assert_eq!(mesh_stride(128, 128), 128);
     }
 
     #[test]
     fn mesh_uniform_size_matches_the_struct() {
         assert_eq!(MESH_UNIFORM_SIZE.get(), size_of::<MeshUniform>() as u64);
+    }
+
+    #[test]
+    fn normal_matrix_uses_inverse_scale() {
+        let columns = normal_matrix(Mat4::from_scale(Vec3::new(2.0, 1.0, 0.5)));
+
+        assert_eq!(columns[0], [0.5, 0.0, 0.0, 0.0]);
+        assert_eq!(columns[1], [0.0, 1.0, 0.0, 0.0]);
+        assert_eq!(columns[2], [0.0, 0.0, 2.0, 0.0]);
+    }
+
+    #[test]
+    fn singular_transform_uses_zero_normal_matrix() {
+        let columns = normal_matrix(Mat4::from_scale(Vec3::new(0.0, 1.0, 1.0)));
+
+        assert_eq!(columns, [[0.0; 4]; 3]);
     }
 
     #[test]

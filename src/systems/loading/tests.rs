@@ -417,6 +417,7 @@ fn composite_gltf_creates_one_object_attached_to_requested_node() {
         ],
         vec![],
         ViewpointState::default(),
+        crate::scene::lighting::SceneLighting::default(),
     );
     let parent = SceneNodeId(1);
 

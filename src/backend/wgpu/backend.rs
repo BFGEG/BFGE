@@ -112,7 +112,11 @@ impl RenderSystem for WgpuRenderSystem {
         };
 
         pipeline.reserve(device, frame.items.len() as u32);
-        pipeline.write_camera(queue, frame.camera.projection * frame.camera.view);
+        pipeline.write_camera(
+            queue,
+            frame.camera.projection * frame.camera.view,
+            frame.lighting,
+        );
         let mut stats = RenderStats::default();
         for (index, item) in frame.items.iter().enumerate() {
             let mesh = buffers.get(device, resources, item.mesh)?;
@@ -175,6 +179,7 @@ impl RenderSystem for WgpuRenderSystem {
 mod tests {
     use crate::math::Mat4;
     use crate::render::frame::RenderCamera;
+    use crate::scene::lighting::SceneLighting;
 
     use super::*;
 
@@ -194,6 +199,7 @@ mod tests {
                 view: Mat4::IDENTITY,
                 projection: Mat4::IDENTITY,
             },
+            lighting: SceneLighting::default(),
             items: Vec::new(),
         };
         assert!(matches!(backend.render(&frame, &ResourceManager::new()),

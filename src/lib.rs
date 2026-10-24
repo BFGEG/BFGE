@@ -28,6 +28,7 @@ pub use crate::render::system::RenderError;
 pub use crate::scene::api::SceneApi;
 pub use crate::scene::error::SceneError;
 pub use crate::scene::ids::{SceneNodeId, SceneObjectId};
+pub use crate::scene::lighting::{DirectionalLight, SceneLighting};
 pub use crate::scene::transform::Transform;
 pub use crate::scene::viewpoint::ViewpointState;
 pub use crate::systems::loading::ModelLoadError;

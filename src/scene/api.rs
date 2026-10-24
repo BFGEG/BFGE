@@ -2,6 +2,7 @@
 
 use crate::scene::error::SceneError;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
+use crate::scene::lighting::SceneLighting;
 use crate::scene::transform::Transform;
 use crate::scene::viewpoint::ViewpointState;
 
@@ -37,4 +38,19 @@ pub trait SceneApi {
 
     /// Sets the viewpoint's position, view direction and field of view.
     fn set_viewpoint(&mut self, state: ViewpointState) -> Result<(), SceneError>;
+
+    /// Returns the ambient and directional lighting currently used by the scene.
+    fn lighting(&self) -> SceneLighting;
+
+    /// Sets the ambient and directional lighting for subsequent frames.
+    ///
+    /// Colors must be finite and nonnegative. The direction must be finite and
+    /// normalizable; it points in the direction the light rays travel.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::InvalidLightDirection`] or
+    /// [`SceneError::InvalidLightColor`] for invalid input. The previous
+    /// lighting remains active on error.
+    fn set_lighting(&mut self, lighting: SceneLighting) -> Result<(), SceneError>;
 }

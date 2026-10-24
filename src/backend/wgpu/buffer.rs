@@ -9,7 +9,7 @@ use crate::math::Vec3;
 use crate::render::system::RenderError;
 use crate::resources::handle::MeshHandle;
 use crate::resources::manager::ResourceManager;
-use crate::resources::mesh::Mesh;
+use crate::resources::mesh::{Mesh, SubMesh};
 
 const VERTEX_BUFFER_LABEL: &str = "BFGE mesh vertices";
 const INDEX_BUFFER_LABEL: &str = "BFGE mesh indices";
@@ -18,7 +18,7 @@ const INDEX_BUFFER_LABEL: &str = "BFGE mesh indices";
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
 pub(crate) struct GpuVertex {
     pub(crate) position: [f32; 3],
-    pub(crate) tint: [f32; 3],
+    pub(crate) normal: [f32; 3],
 }
 
 impl GpuVertex {
@@ -28,18 +28,35 @@ impl GpuVertex {
         attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
     };
 
-    fn from_position(position: Vec3) -> Self {
+    fn from_position_and_normal(position: Vec3, normal: Vec3) -> Self {
         Self {
             position: position.to_array(),
-            tint: tint(position),
+            normal: normal.to_array(),
         }
     }
 }
 
-fn tint(position: Vec3) -> [f32; 3] {
-    let value = 0.5 + 0.5 * (position.x + position.y + position.z) / 3.0;
-    let value = value.clamp(0.0, 1.0);
-    [value, value, value]
+fn vertex_normals(submesh: &SubMesh) -> Vec<Vec3> {
+    let mut normals = vec![Vec3::ZERO; submesh.vertices.len()];
+    for triangle in submesh.indices.chunks_exact(3) {
+        let [a, b, c] = [
+            triangle[0] as usize,
+            triangle[1] as usize,
+            triangle[2] as usize,
+        ];
+        let (Some(va), Some(vb), Some(vc)) = (
+            submesh.vertices.get(a),
+            submesh.vertices.get(b),
+            submesh.vertices.get(c),
+        ) else {
+            continue;
+        };
+        let normal = (vb.position - va.position).cross(vc.position - va.position);
+        for index in [a, b, c] {
+            normals[index] += normal;
+        }
+    }
+    normals.into_iter().map(Vec3::normalize_or_zero).collect()
 }
 
 #[derive(Debug)]
@@ -89,10 +106,14 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
         .submeshes
         .iter()
         .map(|submesh| {
+            let normals = vertex_normals(submesh);
             let vertices = submesh
                 .vertices
                 .iter()
-                .map(|vertex| GpuVertex::from_position(vertex.position))
+                .zip(normals)
+                .map(|(vertex, normal)| {
+                    GpuVertex::from_position_and_normal(vertex.position, normal)
+                })
                 .collect::<Vec<_>>();
             let vertices = create_buffer(
                 device,
@@ -138,17 +159,36 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tint_is_clamped_to_unit_range() {
-        assert_eq!(tint(Vec3::new(-100.0, -100.0, -100.0)), [0.0, 0.0, 0.0]);
-        assert_eq!(tint(Vec3::new(100.0, 100.0, 100.0)), [1.0, 1.0, 1.0]);
+    fn cube_normals_point_outward() {
+        use crate::resources::library::{BuiltinMesh, MeshLibrary};
+
+        let cube = MeshLibrary::build(BuiltinMesh::Cube);
+        let submesh = &cube.submeshes[0];
+        let normals = vertex_normals(submesh);
+
+        for (vertex, normal) in submesh.vertices.iter().zip(normals) {
+            assert!(normal.dot(vertex.position) > 0.0);
+        }
     }
 
     #[test]
-    fn tint_is_grayscale_and_deterministic() {
-        let a = tint(Vec3::new(0.5, -0.5, 0.5));
-        assert_eq!(a[0], a[1]);
-        assert_eq!(a[1], a[2]);
-        assert_eq!(a, tint(Vec3::new(0.5, -0.5, 0.5)));
+    fn degenerate_triangle_has_zero_normals() {
+        use crate::resources::mesh::Vertex;
+
+        let submesh = SubMesh {
+            vertices: vec![
+                Vertex {
+                    position: Vec3::ZERO,
+                },
+                Vertex { position: Vec3::X },
+                Vertex {
+                    position: Vec3::X * 2.0,
+                },
+            ],
+            indices: vec![0, 1, 2],
+        };
+
+        assert_eq!(vertex_normals(&submesh), vec![Vec3::ZERO; 3]);
     }
 
     #[test]

@@ -5,6 +5,7 @@ use crate::resources::manager::ResourceManager;
 use crate::resources::mesh::Mesh;
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
+use crate::scene::lighting::SceneLighting;
 use crate::scene::manager::SceneManager;
 use crate::scene::node::SceneNode;
 use crate::scene::object::SceneObject;
@@ -35,6 +36,7 @@ struct SavedScene {
     objects: Vec<SavedObject>,
     meshes: Vec<Mesh>,
     viewpoint: ViewpointState,
+    lighting: SceneLighting,
 }
 
 /// A saved scene node: parent, children, attached objects and a local transform.
@@ -110,6 +112,9 @@ impl SavedScene {
         }
         let object_count = self.objects.len();
         let mesh_count = self.meshes.len();
+        self.lighting
+            .validate()
+            .map_err(|error| error.to_string())?;
 
         for (index, node) in self.nodes.iter().enumerate() {
             if index != 0 && node.parent.is_none() {
@@ -234,7 +239,7 @@ pub enum ScenePersistenceError {
 /// Saves the full scene state (replaces the previous save).
 ///
 /// Captures the scene tree, the objects, the registered meshes and the
-/// viewpoint. The previous save is replaced only after the new state has been
+/// viewpoint and lighting. The previous save is replaced only after the new state has been
 /// fully captured, so a failed save never destroys an earlier save. In-memory
 /// saving cannot fail; [`ScenePersistenceError::Save`] is reserved for the
 /// file-backed version (milestone 2).
@@ -256,6 +261,7 @@ pub fn save_scene(
             .collect(),
         meshes: resources.meshes().to_vec(),
         viewpoint: scene.viewpoint(),
+        lighting: scene.lighting(),
     };
     store.saved = Some(saved);
     Ok(())
@@ -284,7 +290,7 @@ pub fn restore_scene(
     };
     saved.validate().map_err(ScenePersistenceError::Restore)?;
     let (nodes, objects) = saved.to_scene_parts();
-    scene.restore(nodes, objects, saved.viewpoint);
+    scene.restore(nodes, objects, saved.viewpoint, saved.lighting);
     resources.restore_meshes(saved.meshes.clone());
     Ok(())
 }
@@ -296,6 +302,7 @@ mod tests {
     use crate::math::Vec3;
     use crate::platform::WindowSize;
     use crate::resources::library::{BuiltinMesh, MeshLibrary};
+    use crate::scene::lighting::{DirectionalLight, SceneLighting};
 
     const TEST_WIDTH: u32 = 800;
     const TEST_HEIGHT: u32 = 600;
@@ -314,6 +321,15 @@ mod tests {
             )
             .unwrap();
         scene.create_object(mesh, child).unwrap();
+        scene
+            .set_lighting(SceneLighting {
+                ambient: Vec3::splat(0.1),
+                directional: DirectionalLight {
+                    direction: Vec3::X,
+                    color: Vec3::splat(0.9),
+                },
+            })
+            .unwrap();
         let mut store = SceneStore::new();
 
         let before = scene.build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT));
@@ -325,8 +341,32 @@ mod tests {
 
         let after = scene_after.build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT));
         assert_eq!(before.camera, after.camera);
+        assert_eq!(before.lighting, after.lighting);
         assert_eq!(before.items, after.items);
         assert!(resources_after.mesh(mesh).is_some());
+    }
+
+    #[test]
+    fn invalid_saved_lighting_does_not_change_the_scene() {
+        let mut store = SceneStore {
+            saved: Some(SavedScene {
+                nodes: vec![SavedNode::from_node(&SceneNode::default())],
+                objects: Vec::new(),
+                meshes: Vec::new(),
+                viewpoint: ViewpointState::default(),
+                lighting: SceneLighting {
+                    ambient: Vec3::splat(-1.0),
+                    ..SceneLighting::default()
+                },
+            }),
+        };
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+
+        let result = restore_scene(&mut store, &mut scene, &mut resources);
+
+        assert!(matches!(result, Err(ScenePersistenceError::Restore(_))));
+        assert_eq!(scene.lighting(), SceneLighting::default());
     }
 
     #[test]
@@ -416,6 +456,7 @@ mod tests {
             objects: Vec::new(),
             meshes: Vec::new(),
             viewpoint: ViewpointState::default(),
+            lighting: SceneLighting::default(),
         });
         let mut scene = SceneManager::new();
         let mut resources = ResourceManager::new();
@@ -449,6 +490,7 @@ mod tests {
             objects: Vec::new(),
             meshes: Vec::new(),
             viewpoint: ViewpointState::default(),
+            lighting: SceneLighting::default(),
         });
         let mut scene = SceneManager::new();
         let mut resources = ResourceManager::new();
@@ -482,6 +524,7 @@ mod tests {
             objects: Vec::new(),
             meshes: Vec::new(),
             viewpoint: ViewpointState::default(),
+            lighting: SceneLighting::default(),
         });
         let mut scene = SceneManager::new();
         let mut resources = ResourceManager::new();
@@ -521,6 +564,7 @@ mod tests {
             objects: Vec::new(),
             meshes: Vec::new(),
             viewpoint: ViewpointState::default(),
+            lighting: SceneLighting::default(),
         });
         let mut scene = SceneManager::new();
         let mut resources = ResourceManager::new();

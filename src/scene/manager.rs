@@ -7,28 +7,31 @@ use crate::resources::handle::MeshHandle;
 use crate::scene::api::SceneApi;
 use crate::scene::error::SceneError;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
+use crate::scene::lighting::SceneLighting;
 use crate::scene::node::SceneNode;
 use crate::scene::object::SceneObject;
 use crate::scene::transform::Transform;
 use crate::scene::viewpoint::ViewpointState;
 
-/// Manages the scene tree, scene objects and the viewpoint.
+/// Manages the scene tree, scene objects, viewpoint and lighting.
 #[derive(Debug)]
 pub struct SceneManager {
     root: SceneNodeId,
     nodes: Vec<SceneNode>,
     objects: Vec<SceneObject>,
     viewpoint: ViewpointState,
+    lighting: SceneLighting,
 }
 
 impl SceneManager {
-    /// Creates a scene with a root node and a default viewpoint.
+    /// Creates a scene with a root node, viewpoint and lighting defaults.
     pub fn new() -> Self {
         Self {
             root: SceneNodeId(0),
             nodes: vec![SceneNode::default()],
             objects: Vec::new(),
             viewpoint: ViewpointState::default(),
+            lighting: SceneLighting::default(),
         }
     }
 
@@ -75,6 +78,7 @@ impl SceneManager {
                 view: math::view(self.viewpoint.position, self.viewpoint.direction),
                 projection: math::perspective(self.viewpoint.fov_y, aspect_ratio),
             },
+            lighting: self.lighting,
             items,
         }
     }
@@ -118,10 +122,12 @@ impl SceneManager {
         nodes: Vec<SceneNode>,
         objects: Vec<SceneObject>,
         viewpoint: ViewpointState,
+        lighting: SceneLighting,
     ) {
         self.nodes = nodes;
         self.objects = objects;
         self.viewpoint = viewpoint;
+        self.lighting = lighting;
     }
 }
 
@@ -191,6 +197,16 @@ impl SceneApi for SceneManager {
 
     fn set_viewpoint(&mut self, state: ViewpointState) -> Result<(), SceneError> {
         self.viewpoint = state;
+        Ok(())
+    }
+
+    fn lighting(&self) -> SceneLighting {
+        self.lighting
+    }
+
+    fn set_lighting(&mut self, lighting: SceneLighting) -> Result<(), SceneError> {
+        lighting.validate()?;
+        self.lighting = lighting;
         Ok(())
     }
 }
