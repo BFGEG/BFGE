@@ -2,23 +2,23 @@
 
 use crate::math::Vec3;
 
-/// Geometry vertex. In version 1 - position only.
+/// A geometry vertex containing a position in model space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
     /// Vertex position.
     pub position: Vec3,
 }
 
-/// Part of geometry: vertices and indices.
+/// Indexed triangle geometry forming one part of a mesh.
 #[derive(Debug, Clone, PartialEq)]
 pub struct SubMesh {
     /// Vertices of the part.
     pub vertices: Vec<Vertex>,
-    /// Triangle indices.
+    /// Indices into `vertices`, grouped in triples to form triangles.
     pub indices: Vec<u32>,
 }
 
-/// Geometry resource and the model's common simple color.
+/// Geometry resource and the single linear RGBA color used for all its parts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mesh {
     /// Geometry parts.

@@ -17,7 +17,7 @@ cargo build --release --locked --features stress-benchmark --bin bfge-stress
 for run in 1 2 3; do
     output="$run_dir/run-$run.json"
     printf 'Run %s/3: %s\n' "$run" "$output"
-    timeout 180s target/release/bfge-stress window docs/stress-scaling.json "$output"
+    timeout 180s target/release/bfge-stress window benchmark/configs/stress-scaling.json "$output"
 done
 
 python3 scripts/summarize-stress-scaling.py "$run_dir" "${BFGE_TARGET_FPS:-60}"

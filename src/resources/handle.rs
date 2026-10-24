@@ -1,6 +1,6 @@
 //! Opaque resource identifiers.
 
-/// Opaque identifier of a geometry resource.
+/// Opaque identifier of geometry registered with the engine's resource manager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct MeshHandle(u32);
 

@@ -5,7 +5,7 @@ use crate::resources::handle::MeshHandle;
 /// A scene object: a mesh instance placed in the scene tree.
 #[derive(Debug)]
 pub struct SceneObject {
-    #[allow(dead_code)] // read by [SCN] build_render_frame (milestone 2)
+    #[allow(dead_code)]
     pub(crate) mesh: MeshHandle,
 }
 

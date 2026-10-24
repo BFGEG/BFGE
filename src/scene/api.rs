@@ -6,17 +6,36 @@ use crate::scene::lighting::SceneLighting;
 use crate::scene::transform::Transform;
 use crate::scene::viewpoint::ViewpointState;
 
-/// Operations to create and modify the spatial scene.
+/// Operations to create and modify the scene hierarchy, viewpoint and lighting.
 pub trait SceneApi {
     /// Returns the root node created together with the scene.
+    ///
+    /// # Returns
+    ///
+    /// The identifier of the scene's root node.
     fn root_node(&self) -> SceneNodeId;
 
-    /// Creates a child node for the given parent node.
+    /// Creates a child node with an identity transform.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownNode`] if `parent` does not identify a node
+    /// in this scene.
+    ///
+    /// # Returns
+    ///
+    /// The identifier assigned to the new node.
     fn create_node(&mut self, parent: SceneNodeId) -> Result<SceneNodeId, SceneError>;
 
     /// Sets the node's translation, rotation and scale relative to its parent.
     ///
-    /// For the root node the transform is relative to the scene.
+    /// For the root node the transform is relative to the scene. Values are
+    /// stored as provided; the operation does not validate finiteness or scale.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownNode`] if `node` does not identify a node
+    /// in this scene.
     fn set_node_transform(
         &mut self,
         node: SceneNodeId,
@@ -26,7 +45,13 @@ pub trait SceneApi {
     /// Reparents an object to another node.
     ///
     /// After reparenting, the object's position, rotation and scale are
-    /// determined by the new node.
+    /// determined by the new node. Its previous node no longer references it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] or [`SceneError::UnknownNode`] if
+    /// either identifier does not belong to this scene. On error, no change is
+    /// made.
     fn reparent_object(
         &mut self,
         object: SceneObjectId,
@@ -34,12 +59,29 @@ pub trait SceneApi {
     ) -> Result<(), SceneError>;
 
     /// Returns the current state of the single viewpoint.
+    ///
+    /// # Returns
+    ///
+    /// A copy of the viewpoint state.
     fn viewpoint(&self) -> ViewpointState;
 
     /// Sets the viewpoint's position, view direction and field of view.
+    ///
+    /// Values are stored as provided; this operation does not validate them.
+    /// Use a finite position, a finite nonzero direction not parallel to the
+    /// world up axis, and a field of view between zero and π radians to form a
+    /// meaningful view and projection.
+    ///
+    /// # Errors
+    ///
+    /// This implementation currently accepts every value and returns `Ok(())`.
     fn set_viewpoint(&mut self, state: ViewpointState) -> Result<(), SceneError>;
 
     /// Returns the ambient and directional lighting currently used by the scene.
+    ///
+    /// # Returns
+    ///
+    /// A copy of the current lighting settings.
     fn lighting(&self) -> SceneLighting;
 
     /// Sets the ambient and directional lighting for subsequent frames.

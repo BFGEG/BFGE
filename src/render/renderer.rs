@@ -6,28 +6,44 @@ use crate::render::stats::RenderStats;
 use crate::render::system::{RenderError, RenderSystem};
 use crate::resources::manager::ResourceManager;
 
-/// Owner of the graphics system.
+/// Coordinates frame submission and window lifecycle for a graphics system.
 pub struct Renderer {
     render_system: Box<dyn RenderSystem>,
 }
 
 impl Renderer {
-    /// Creates a renderer over the given graphics system.
+    /// Creates a renderer that delegates to `render_system`.
     pub fn new(render_system: Box<dyn RenderSystem>) -> Self {
         Self { render_system }
     }
 
-    /// # Errors - see [`RenderSystem::initialize`].
+    /// Initializes the graphics system for `window`.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot initialize its graphics resources.
     pub fn initialize(&mut self, window: &Window) -> Result<(), RenderError> {
         self.render_system.initialize(window)
     }
 
-    /// # Errors - see [`RenderSystem::set_window_size`].
+    /// Applies a new window size to the graphics system.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot apply the size.
     pub fn set_window_size(&mut self, size: WindowSize) -> Result<(), RenderError> {
         self.render_system.set_window_size(size)
     }
 
-    /// # Errors - see [`RenderSystem::render`].
+    /// Renders `frame` using geometry registered in `resources`.
+    ///
+    /// Returns statistics for the render pass. A backend may return zeroed
+    /// statistics when a frame cannot be presented temporarily.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the backend cannot render the frame or resolve a
+    /// referenced mesh.
     pub fn render(
         &mut self,
         frame: &RenderFrame,
@@ -36,7 +52,7 @@ impl Renderer {
         self.render_system.render(frame, resources)
     }
 
-    /// Shuts the graphics system down.
+    /// Releases graphics resources held by the graphics system.
     pub fn shutdown(&mut self) {
         self.render_system.shutdown();
     }

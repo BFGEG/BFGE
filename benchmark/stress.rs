@@ -885,7 +885,7 @@ mod tests {
 
     #[test]
     fn existing_stress_config_keeps_synthetic_scenes() {
-        let config: Config = serde_json::from_str(include_str!("../docs/stress-config.json"))
+        let config: Config = serde_json::from_str(include_str!("configs/stress-config.json"))
             .expect("the existing benchmark configuration is valid JSON");
 
         assert!(
@@ -899,7 +899,7 @@ mod tests {
 
     #[test]
     fn baseline_config_builds_the_full_cube_grid() {
-        let config: Config = serde_json::from_str(include_str!("../docs/stress-baseline.json"))
+        let config: Config = serde_json::from_str(include_str!("configs/stress-baseline.json"))
             .expect("the bundled baseline configuration is valid JSON");
         validate(&config).expect("the baseline values match the cube grid requirements");
         let (scene, resources) =
@@ -912,7 +912,7 @@ mod tests {
 
     #[test]
     fn scaling_config_has_increasing_valid_cube_grids() {
-        let config: Config = serde_json::from_str(include_str!("../docs/stress-scaling.json"))
+        let config: Config = serde_json::from_str(include_str!("configs/stress-scaling.json"))
             .expect("the bundled scaling configuration is valid JSON");
         validate(&config).expect("all scaling scenarios use valid cube grids");
 
