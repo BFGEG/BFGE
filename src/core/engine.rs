@@ -55,10 +55,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Returns the engine's winit event loop, creating it on first use.
+    /// Returns the engine's native event loop, creating it on first use.
     ///
-    /// The loop is created once and reused by every following session; winit
-    /// allows a single loop per process (see Wgpu_Backend.md).
+    /// The loop is created once and reused by every following session. See
+    /// `docs/graphics.md` for the window and backend lifecycle.
     fn acquire_event_loop(&mut self) -> Result<&mut EventLoop<()>, EngineError> {
         if self.winit_loop.is_none() {
             self.winit_loop = Some(new_event_loop()?);

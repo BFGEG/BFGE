@@ -70,8 +70,10 @@ pub trait EngineApi {
 
     /// Sets the size of the engine's window.
     ///
-    /// May be called while the engine is running; the window and the render
-    /// surface are rebuilt for the new size.
+    /// Call after `initialize` and before `shutdown`. The blocking `run` method
+    /// holds mutable access to the engine, so the client cannot call this
+    /// operation during that run. Native window resize events are handled by
+    /// the engine loop.
     fn set_window_size(&mut self, size: WindowSize) -> Result<(), EngineError>;
 
     /// Saves the full scene state to the engine-defined storage.

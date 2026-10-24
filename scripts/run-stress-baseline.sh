@@ -17,7 +17,7 @@ cargo build --release --locked --features stress-benchmark --bin bfge-stress
 for run in 1 2 3; do
     output="$run_dir/run-$run.json"
     printf 'Run %s/3: %s\n' "$run" "$output"
-    timeout 120s target/release/bfge-stress window docs/stress-baseline.json "$output"
+    timeout 120s target/release/bfge-stress window benchmark/configs/stress-baseline.json "$output"
 done
 
 printf 'Reports: %s\n' "$run_dir"

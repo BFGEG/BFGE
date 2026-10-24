@@ -1,0 +1,221 @@
+digraph BFGE {
+  graph [
+    rankdir=TB,
+    bgcolor="white",
+    pad=0.35,
+    nodesep=0.4,
+    ranksep=0.75,
+    splines=polyline,
+    fontname="DejaVu Sans",
+    fontsize=20,
+    labelloc=t,
+    label="Диаграмма классов BFGE"
+  ];
+  node [shape=plain, fontname="DejaVu Sans", fontsize=11];
+  edge [color="#475569", fontname="DejaVu Sans", fontsize=9, arrowsize=0.75];
+
+  subgraph cluster_core {
+    label="Управление движком";
+    color="#93c5fd"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    Engine [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dbeafe"><B>Engine</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Координация сессии и кадров</TD></TR>
+      </TABLE>>];
+    EngineParts [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dbeafe"><B>EngineParts</B></TD></TR>
+        <TR><TD ALIGN="LEFT">scene · resources · renderer · store</TD></TR>
+      </TABLE>>];
+    EngineLoop [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dbeafe"><B>EngineLoop</B></TD></TR>
+        <TR><TD ALIGN="LEFT">События и обработчики кадров</TD></TR>
+      </TABLE>>];
+  }
+
+  subgraph cluster_scene {
+    label="Сцена";
+    color="#86efac"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    SceneManager [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dcfce7"><B>SceneManager</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Дерево · объекты · точка обзора · освещение</TD></TR>
+      </TABLE>>];
+    SceneNode [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dcfce7"><B>SceneNode</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Локальное преобразование</TD></TR>
+      </TABLE>>];
+    SceneObject [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dcfce7"><B>SceneObject</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Экземпляр геометрии</TD></TR>
+      </TABLE>>];
+    Transform [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dcfce7"><B>Transform</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Положение · поворот · масштаб</TD></TR>
+      </TABLE>>];
+    ViewpointState [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dcfce7"><B>ViewpointState</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Положение · направление · угол обзора</TD></TR>
+      </TABLE>>];
+    SceneLighting [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#dcfce7"><B>SceneLighting</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Окружающий и направленный свет</TD></TR>
+      </TABLE>>];
+  }
+
+  subgraph cluster_resources {
+    label="Ресурсы";
+    color="#fcd34d"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    ResourceManager [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fef3c7"><B>ResourceManager</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Регистрирует и хранит геометрию</TD></TR>
+      </TABLE>>];
+    Mesh [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fef3c7"><B>Mesh</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Цвет · части геометрии</TD></TR>
+      </TABLE>>];
+    SubMesh [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fef3c7"><B>SubMesh</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Вершины · индексы треугольников</TD></TR>
+      </TABLE>>];
+    MeshHandle [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fef3c7"><B>MeshHandle</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Идентификатор ресурса</TD></TR>
+      </TABLE>>];
+  }
+
+  subgraph cluster_render {
+    label="Подготовка и отображение кадра";
+    color="#f9a8d4"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    RenderFrame [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fce7f3"><B>RenderFrame</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Камера · освещение · объекты кадра</TD></TR>
+      </TABLE>>];
+    RenderCamera [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fce7f3"><B>RenderCamera</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Матрицы вида и проекции</TD></TR>
+      </TABLE>>];
+    RenderItem [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fce7f3"><B>RenderItem</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Преобразование · идентификатор меша</TD></TR>
+      </TABLE>>];
+    Renderer [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fce7f3"><B>Renderer</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Передаёт кадр графической системе</TD></TR>
+      </TABLE>>];
+    RenderSystem [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#fce7f3"><B>«interface» RenderSystem</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Инициализация · размер · отображение · завершение</TD></TR>
+      </TABLE>>];
+  }
+
+  subgraph cluster_platform {
+    label="Оконная платформа";
+    color="#fdba74"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    PlatformAdapter [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#ffedd5"><B>PlatformAdapter</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Окно активной сессии</TD></TR>
+      </TABLE>>];
+    Window [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#ffedd5"><B>Window</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Размер · параметры окна</TD></TR>
+      </TABLE>>];
+  }
+
+  subgraph cluster_systems {
+    label="Системные операции";
+    color="#c4b5fd"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    SceneStore [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#ede9fe"><B>SceneStore</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Снимок состояния сцены и ресурсов</TD></TR>
+      </TABLE>>];
+  }
+
+  subgraph cluster_backend {
+    label="Графический backend";
+    color="#cbd5e1"; style="rounded"; fontname="DejaVu Sans"; fontsize=13;
+    WgpuRenderSystem [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#e2e8f0"><B>WgpuRenderSystem</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Реализация графической системы</TD></TR>
+      </TABLE>>];
+    RenderSurface [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#e2e8f0"><B>RenderSurface</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Устройство · очередь · поверхность вывода</TD></TR>
+      </TABLE>>];
+    MeshPipeline [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#e2e8f0"><B>MeshPipeline</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Настройки отрисовки мешей</TD></TR>
+      </TABLE>>];
+    MeshBufferCache [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#e2e8f0"><B>MeshBufferCache</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Повторно используемые GPU-буферы</TD></TR>
+      </TABLE>>];
+    DepthTarget [label=<
+      <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="6">
+        <TR><TD BGCOLOR="#e2e8f0"><B>DepthTarget</B></TD></TR>
+        <TR><TD ALIGN="LEFT">Буфер глубины кадра</TD></TR>
+      </TABLE>>];
+  }
+
+  Engine -> EngineParts [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  Engine -> EngineLoop [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  Engine -> PlatformAdapter [dir=both, arrowtail=diamond, arrowhead=none, label="0..1", constraint=false];
+  EngineParts -> SceneManager [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  EngineParts -> ResourceManager [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  EngineParts -> Renderer [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  EngineParts -> SceneStore [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+
+  SceneManager -> SceneNode [dir=both, arrowtail=diamond, arrowhead=none, label="1..*"];
+  SceneManager -> SceneObject [dir=both, arrowtail=diamond, arrowhead=none, label="0..*"];
+  SceneManager -> ViewpointState [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  SceneManager -> SceneLighting [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  SceneNode -> SceneNode [dir=both, arrowtail=diamond, arrowhead=none, label="родитель / дети"];
+  SceneNode -> Transform [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  SceneNode -> SceneObject [dir=both, arrowtail=diamond, arrowhead=none, label="0..*"];
+  SceneObject -> MeshHandle [arrowhead=vee, label="ссылается на"];
+
+  ResourceManager -> Mesh [dir=both, arrowtail=diamond, arrowhead=none, label="0..*"];
+  Mesh -> SubMesh [dir=both, arrowtail=diamond, arrowhead=none, label="1..*"];
+  MeshHandle -> Mesh [style=dashed, arrowhead=vee, label="идентифицирует"];
+
+  SceneManager -> RenderFrame [style=dashed, arrowhead=vee, label="собирает", constraint=false];
+  RenderFrame -> RenderCamera [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  RenderFrame -> SceneLighting [style=dashed, arrowhead=vee, label="содержит данные", constraint=false];
+  RenderFrame -> RenderItem [dir=both, arrowtail=diamond, arrowhead=none, label="0..*"];
+  RenderItem -> MeshHandle [arrowhead=vee, label="ссылается на"];
+  Renderer -> RenderSystem [arrowhead=vee, label="владеет реализацией"];
+  RenderSystem -> WgpuRenderSystem [style=dashed, arrowhead=empty, label="реализует"];
+  Renderer -> RenderFrame [style=dashed, arrowhead=vee, label="передаёт", constraint=false];
+  Renderer -> ResourceManager [style=dashed, arrowhead=vee, label="читает геометрию", constraint=false];
+
+  PlatformAdapter -> Window [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  WgpuRenderSystem -> RenderSurface [dir=both, arrowtail=diamond, arrowhead=none, label="0..1"];
+  WgpuRenderSystem -> MeshPipeline [dir=both, arrowtail=diamond, arrowhead=none, label="0..1"];
+  WgpuRenderSystem -> MeshBufferCache [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  WgpuRenderSystem -> DepthTarget [dir=both, arrowtail=diamond, arrowhead=none, label="1"];
+  RenderSurface -> Window [style=dashed, arrowhead=vee, label="создаётся для", constraint=false];
+  SceneStore -> SceneManager [style=dashed, arrowhead=vee, label="сохраняет / восстанавливает", constraint=false];
+  SceneStore -> ResourceManager [style=dashed, arrowhead=vee, label="сохраняет / восстанавливает", constraint=false];
+}

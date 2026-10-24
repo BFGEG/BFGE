@@ -241,10 +241,10 @@ impl ApplicationHandler for EventRecorder {
     }
 }
 
-/// Creates a new event loop for the engine.
+/// Creates the native event loop for the engine.
 ///
-/// The event loop is created once and reused for every window in following
-/// sessions; winit allows a single loop per process (see Wgpu_Backend.md).
+/// The event loop is created once and reused for every following window session.
+/// See `docs/graphics.md` for the window and backend lifecycle.
 pub(crate) fn new_event_loop() -> Result<EventLoop<()>> {
     EventLoop::new().map_err(|error| PlatformError::EventLoopCreation(error.to_string()))
 }
