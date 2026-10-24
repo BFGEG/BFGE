@@ -12,17 +12,19 @@ use winit::error::EventLoopError;
 use winit::event_loop::EventLoop;
 
 use crate::backend::wgpu::backend::WgpuRenderSystem;
-use crate::math::Vec3;
+use crate::math::{Quat, Vec3};
 use crate::platform::{
     PlatformAdapter, PlatformError, PlatformEvent, WindowDescriptor, WindowSize,
 };
 use crate::render::system::{RenderError, RenderSystem};
+use crate::resources::library::BuiltinMesh;
 use crate::resources::manager::ResourceManager;
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 use crate::scene::api::SceneApi;
 use crate::scene::error::SceneError;
 use crate::scene::manager::SceneManager;
 use crate::scene::transform::Transform;
+use crate::scene::viewpoint::ViewpointState;
 
 const WINDOW_TITLE: &str = "BFGE stress benchmark";
 const MEMORY_SAMPLE_INTERVAL: Duration = Duration::from_secs(1);
@@ -32,6 +34,11 @@ const PROC_CPUINFO: &str = "/proc/cpuinfo";
 const RSS_FIELD: &str = "VmRSS:";
 const PEAK_RSS_FIELD: &str = "VmHWM:";
 const CPU_MODEL_FIELD: &str = "model name";
+const CUBE_GRID_SPACING: f32 = 2.0;
+const CUBE_GRID_CAMERA_HORIZONTAL: f32 = 2.8;
+const CUBE_GRID_CAMERA_VERTICAL: f32 = 2.0;
+const CUBE_GRID_ROTATION_RADIANS_PER_SECOND: f32 = 0.35;
+const FRAME_WINDOW_INTERVAL: Duration = Duration::from_secs(1);
 
 /// Failure to configure, run, or save a stress benchmark.
 #[derive(Debug, thiserror::Error)]
@@ -112,6 +119,14 @@ impl SyncMode {
     }
 }
 
+#[derive(Debug, Default, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SceneKind {
+    #[default]
+    Synthetic,
+    CubeGrid,
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
@@ -126,6 +141,8 @@ struct Config {
 #[serde(deny_unknown_fields)]
 struct Scenario {
     name: String,
+    #[serde(default)]
+    scene_kind: SceneKind,
     objects: usize,
     nodes: usize,
     depth: usize,
@@ -150,6 +167,15 @@ struct MemorySample {
 }
 
 #[derive(Debug, Serialize)]
+struct FrameWindow {
+    elapsed_seconds: f64,
+    duration_seconds: f64,
+    frames: usize,
+    fps: f64,
+    p95_full_pass_ns: u64,
+}
+
+#[derive(Debug, Serialize)]
 struct ScenarioResult<'a> {
     scenario: &'a Scenario,
     measured_seconds: f64,
@@ -159,6 +185,7 @@ struct ScenarioResult<'a> {
     full_pass_ns: Option<Summary>,
     frame_preparation_histogram_ns: BTreeMap<u64, usize>,
     full_pass_histogram_ns: Option<BTreeMap<u64, usize>>,
+    frame_windows: Option<Vec<FrameWindow>>,
     memory: Vec<MemorySample>,
 }
 
@@ -167,6 +194,10 @@ struct Hardware {
     cpu_model: Option<String>,
     gpu: Option<String>,
     gpu_backend: Option<String>,
+    gpu_driver: Option<String>,
+    gpu_driver_info: Option<String>,
+    gpu_vendor: Option<u32>,
+    gpu_device: Option<u32>,
     operating_system: String,
 }
 
@@ -243,11 +274,14 @@ pub fn run(mode: BenchmarkMode, config_path: &Path, output_path: &Path) -> Resul
         None
     };
     let mut results = Vec::with_capacity(config.scenarios.len());
-    let mut gpu = None;
-    let mut gpu_backend = None;
+    let mut adapter_info: Option<wgpu::AdapterInfo> = None;
 
     for scenario in &config.scenarios {
-        let (scene, resources) = build_scene(scenario)?;
+        println!(
+            "Benchmark scenario {}: {} objects",
+            scenario.name, scenario.objects
+        );
+        let (mut scene, resources) = build_scene(scenario)?;
         let (result, adapter) = match mode {
             BenchmarkMode::SceneOnly => (measure_scene_only(&scene, &config, scenario)?, None),
             BenchmarkMode::Window => {
@@ -255,13 +289,19 @@ pub fn run(mode: BenchmarkMode, config_path: &Path, output_path: &Path) -> Resul
                     .as_mut()
                     .ok_or_else(|| StressError::Window("missing window event loop".to_owned()))?;
                 let (result, adapter) =
-                    measure_window(&scene, &resources, &config, scenario, loop_ref)?;
+                    measure_window(&mut scene, &resources, &config, scenario, loop_ref)?;
                 (result, Some(adapter))
             }
         };
         if let Some(adapter) = adapter {
-            gpu = Some(adapter.name);
-            gpu_backend = Some(format!("{:?}", adapter.backend));
+            adapter_info = Some(adapter);
+        }
+        if let (Some(fps), Some(summary)) = (result.fps, result.full_pass_ns.as_ref()) {
+            println!(
+                "{} objects: {fps:.1} FPS, p95 {:.2} ms",
+                scenario.objects,
+                summary.p95_ns as f64 / 1_000_000.0
+            );
         }
         results.push(result);
     }
@@ -274,13 +314,21 @@ pub fn run(mode: BenchmarkMode, config_path: &Path, output_path: &Path) -> Resul
         config: &config,
         hardware: Hardware {
             cpu_model: cpu_model(),
-            gpu,
-            gpu_backend,
+            gpu: adapter_info.as_ref().map(|adapter| adapter.name.clone()),
+            gpu_backend: adapter_info
+                .as_ref()
+                .map(|adapter| format!("{:?}", adapter.backend)),
+            gpu_driver: adapter_info.as_ref().map(|adapter| adapter.driver.clone()),
+            gpu_driver_info: adapter_info
+                .as_ref()
+                .map(|adapter| adapter.driver_info.clone()),
+            gpu_vendor: adapter_info.as_ref().map(|adapter| adapter.vendor),
+            gpu_device: adapter_info.as_ref().map(|adapter| adapter.device),
             operating_system: std::env::consts::OS.to_owned(),
         },
         memory_metric: "Linux /proc/self/status VmRSS and VmHWM; process RAM only, not GPU VRAM",
         frame_preparation_definition: "SceneManager::build_render_frame wall time",
-        full_pass_definition: "nonblocking window event pump + build_render_frame + render + present wall time; GPU completion is not awaited",
+        full_pass_definition: "nonblocking window event pump + optional scene animation + build_render_frame + render + present wall time; GPU completion is not awaited",
         results,
     };
     fs::write(output_path, serde_json::to_vec_pretty(&report)?).map_err(|source| {
@@ -318,6 +366,11 @@ fn validate(config: &Config) -> Result<(), StressError> {
                 .objects
                 .checked_mul(scenario.triangles_per_mesh)
                 .is_none_or(|n| n > u32::MAX as usize)
+            || (scenario.scene_kind == SceneKind::CubeGrid
+                && (scenario.objects.checked_add(1) != Some(scenario.nodes)
+                    || scenario.depth != 1
+                    || scenario.meshes != 1
+                    || scenario.triangles_per_mesh != 12))
         {
             return Err(StressError::InvalidConfig(format!(
                 "invalid scenario: {}",
@@ -329,6 +382,61 @@ fn validate(config: &Config) -> Result<(), StressError> {
 }
 
 fn build_scene(scenario: &Scenario) -> Result<(SceneManager, ResourceManager), StressError> {
+    match scenario.scene_kind {
+        SceneKind::Synthetic => build_synthetic_scene(scenario),
+        SceneKind::CubeGrid => build_cube_grid(scenario),
+    }
+}
+
+fn build_cube_grid(scenario: &Scenario) -> Result<(SceneManager, ResourceManager), StressError> {
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let cube = resources.builtin(BuiltinMesh::Cube);
+    let side = (scenario.objects as f64).cbrt().ceil() as usize;
+    let half_extent = (side as f32 - 1.0) * CUBE_GRID_SPACING * 0.5;
+    let camera_position = Vec3::new(
+        side as f32 * CUBE_GRID_CAMERA_HORIZONTAL,
+        side as f32 * CUBE_GRID_CAMERA_VERTICAL,
+        side as f32 * CUBE_GRID_CAMERA_HORIZONTAL,
+    );
+    scene.set_viewpoint(ViewpointState {
+        position: camera_position,
+        direction: -camera_position.normalize(),
+        fov_y: 60.0_f32.to_radians(),
+    })?;
+    let root = scene.root_node();
+    for index in 0..scenario.objects {
+        let column = index % side;
+        let row = (index / side) % side;
+        let layer = index / (side * side);
+        let node = scene.create_node(root)?;
+        scene.set_node_transform(
+            node,
+            Transform::from_translation(Vec3::new(
+                column as f32 * CUBE_GRID_SPACING - half_extent,
+                row as f32 * CUBE_GRID_SPACING - half_extent,
+                layer as f32 * CUBE_GRID_SPACING - half_extent,
+            )),
+        )?;
+        scene.create_object(cube, node)?;
+    }
+    Ok((scene, resources))
+}
+
+fn animate_cube_grid(scene: &mut SceneManager, elapsed_seconds: f32) -> Result<(), StressError> {
+    let root = scene.root_node();
+    scene.set_node_transform(
+        root,
+        Transform::from_rotation(Quat::from_rotation_y(
+            elapsed_seconds * CUBE_GRID_ROTATION_RADIANS_PER_SECOND,
+        )),
+    )?;
+    Ok(())
+}
+
+fn build_synthetic_scene(
+    scenario: &Scenario,
+) -> Result<(SceneManager, ResourceManager), StressError> {
     let mut scene = SceneManager::new();
     let mut resources = ResourceManager::new();
     let mut nodes = Vec::with_capacity(scenario.nodes);
@@ -423,20 +531,22 @@ fn measure_scene_only<'a>(
         full_pass_ns: None,
         frame_preparation_histogram_ns: samples.counts,
         full_pass_histogram_ns: None,
+        frame_windows: None,
         memory,
     })
 }
 
 fn measure_window<'a>(
-    scene: &SceneManager,
+    scene: &mut SceneManager,
     resources: &ResourceManager,
     config: &Config,
     scenario: &'a Scenario,
     event_loop: &mut EventLoop<()>,
 ) -> Result<(ScenarioResult<'a>, wgpu::AdapterInfo), StressError> {
     let size = WindowSize::new(config.width, config.height);
+    let title = format!("{WINDOW_TITLE}: {} objects", scenario.objects);
     let platform = PlatformAdapter::new(
-        WindowDescriptor::new(WINDOW_TITLE, config.width, config.height),
+        WindowDescriptor::new(&title, config.width, config.height),
         event_loop,
     )?;
     if platform.window().size() != size {
@@ -451,9 +561,13 @@ fn measure_window<'a>(
         .ok_or_else(|| StressError::Window("missing GPU adapter".to_owned()))?;
     let expected_triangles = (scenario.objects * scenario.triangles_per_mesh) as u32;
     let expected_draw_calls = scenario.objects as u32;
-    let warmup_end = Instant::now() + Duration::from_secs(config.warmup_seconds);
+    let animation_start = Instant::now();
+    let warmup_end = animation_start + Duration::from_secs(config.warmup_seconds);
     while Instant::now() < warmup_end {
         pump_window(&platform, event_loop, size)?;
+        if scenario.scene_kind == SceneKind::CubeGrid {
+            animate_cube_grid(scene, animation_start.elapsed().as_secs_f32())?;
+        }
         let frame = scene.build_render_frame(size);
         let stats = backend.render(&frame, resources)?;
         if stats.draw_calls != expected_draw_calls || stats.triangles != expected_triangles {
@@ -466,11 +580,17 @@ fn measure_window<'a>(
     let end = start + Duration::from_secs(scenario.duration_seconds);
     let mut preparation_samples = Samples::default();
     let mut pass_samples = Samples::default();
+    let mut window_samples = Samples::default();
+    let mut frame_windows = Vec::new();
+    let mut window_start = start;
     let mut memory = vec![sample_memory(0.0)?];
     let mut next_memory = start + MEMORY_SAMPLE_INTERVAL;
     while Instant::now() < end {
         let pass_start = Instant::now();
         pump_window(&platform, event_loop, size)?;
+        if scenario.scene_kind == SceneKind::CubeGrid {
+            animate_cube_grid(scene, animation_start.elapsed().as_secs_f32())?;
+        }
         let preparation_start = Instant::now();
         let frame = scene.build_render_frame(size);
         let preparation_ns = preparation_start.elapsed().as_nanos() as u64;
@@ -478,6 +598,7 @@ fn measure_window<'a>(
         let pass_ns = pass_start.elapsed().as_nanos() as u64;
         preparation_samples.record(preparation_ns);
         pass_samples.record(pass_ns);
+        window_samples.record(pass_ns);
         if stats.draw_calls != expected_draw_calls || stats.triangles != expected_triangles {
             return Err(StressError::Window(format!(
                 "incomplete measured frame: {stats:?}"
@@ -487,8 +608,18 @@ fn measure_window<'a>(
             memory.push(sample_memory(start.elapsed().as_secs_f64())?);
             next_memory += MEMORY_SAMPLE_INTERVAL;
         }
+        let now = Instant::now();
+        if now.duration_since(window_start) >= FRAME_WINDOW_INTERVAL {
+            frame_windows.push(frame_window(start, window_start, now, &window_samples));
+            window_samples = Samples::default();
+            window_start = now;
+        }
     }
-    let measured_seconds = start.elapsed().as_secs_f64();
+    let finish = Instant::now();
+    if window_samples.total > 0 {
+        frame_windows.push(frame_window(start, window_start, finish, &window_samples));
+    }
+    let measured_seconds = finish.duration_since(start).as_secs_f64();
     memory.push(sample_memory(measured_seconds)?);
     backend.shutdown();
     Ok((
@@ -501,10 +632,27 @@ fn measure_window<'a>(
             full_pass_ns: Some(pass_samples.summary()),
             frame_preparation_histogram_ns: preparation_samples.counts,
             full_pass_histogram_ns: Some(pass_samples.counts),
+            frame_windows: Some(frame_windows),
             memory,
         },
         adapter,
     ))
+}
+
+fn frame_window(
+    start: Instant,
+    window_start: Instant,
+    end: Instant,
+    samples: &Samples,
+) -> FrameWindow {
+    let duration_seconds = end.duration_since(window_start).as_secs_f64();
+    FrameWindow {
+        elapsed_seconds: end.duration_since(start).as_secs_f64(),
+        duration_seconds,
+        frames: samples.total,
+        fps: samples.total as f64 / duration_seconds,
+        p95_full_pass_ns: samples.percentile(95),
+    }
 }
 
 fn pump_window(
@@ -579,6 +727,7 @@ mod tests {
     fn scene_generation_preserves_counts_and_shared_handles() {
         let scenario = Scenario {
             name: "shared".to_owned(),
+            scene_kind: SceneKind::Synthetic,
             objects: 4,
             nodes: 5,
             depth: 2,
@@ -603,6 +752,7 @@ mod tests {
     fn distinct_mesh_scenario_uses_distinct_handles() {
         let scenario = Scenario {
             name: "distinct".to_owned(),
+            scene_kind: SceneKind::Synthetic,
             objects: 3,
             nodes: 4,
             depth: 1,
@@ -630,5 +780,161 @@ mod tests {
         pair.record(1);
         pair.record(2);
         assert_eq!(pair.percentile(50), 1);
+    }
+
+    #[test]
+    fn frame_window_reports_elapsed_fps_and_tail_latency() {
+        let start = Instant::now();
+        let mut samples = Samples::default();
+        samples.record(10);
+        samples.record(20);
+
+        let window = frame_window(start, start, start + Duration::from_secs(1), &samples);
+
+        assert_eq!(window.elapsed_seconds, 1.0);
+        assert_eq!(window.duration_seconds, 1.0);
+        assert_eq!(window.frames, 2);
+        assert_eq!(window.fps, 2.0);
+        assert_eq!(window.p95_full_pass_ns, 20);
+    }
+
+    #[test]
+    fn cube_grid_uses_one_cube_mesh_and_distinct_positions() {
+        let scenario = Scenario {
+            name: "cube_grid".to_owned(),
+            scene_kind: SceneKind::CubeGrid,
+            objects: 8,
+            nodes: 9,
+            depth: 1,
+            triangles_per_mesh: 12,
+            meshes: 1,
+            duration_seconds: 1,
+        };
+        let (scene, resources) = build_scene(&scenario).expect("valid cube grid must build");
+        let frame = scene.build_render_frame(WindowSize::new(800, 600));
+
+        assert_eq!(scene.nodes().len(), 9);
+        assert_eq!(resources.meshes().len(), 1);
+        assert_eq!(frame.items.len(), 8);
+        assert!(
+            frame
+                .items
+                .iter()
+                .all(|item| item.mesh == frame.items[0].mesh)
+        );
+        assert_eq!(resources.meshes()[0].submeshes[0].indices.len(), 36);
+        assert_eq!(
+            frame.items[0].world_transform.transform_point3(Vec3::ZERO),
+            Vec3::new(-1.0, -1.0, -1.0)
+        );
+        assert_eq!(
+            frame.items[7].world_transform.transform_point3(Vec3::ZERO),
+            Vec3::new(1.0, 1.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn cube_grid_rejects_inconsistent_geometry() {
+        let config = Config {
+            width: 800,
+            height: 600,
+            sync_mode: SyncMode::Vsync,
+            warmup_seconds: 1,
+            scenarios: vec![Scenario {
+                name: "invalid_cube_grid".to_owned(),
+                scene_kind: SceneKind::CubeGrid,
+                objects: 8,
+                nodes: 9,
+                depth: 1,
+                triangles_per_mesh: 120,
+                meshes: 1,
+                duration_seconds: 1,
+            }],
+        };
+
+        assert!(matches!(
+            validate(&config),
+            Err(StressError::InvalidConfig(_))
+        ));
+    }
+
+    #[test]
+    fn cube_grid_animation_moves_objects_between_frames() {
+        let scenario = Scenario {
+            name: "animated_cube_grid".to_owned(),
+            scene_kind: SceneKind::CubeGrid,
+            objects: 8,
+            nodes: 9,
+            depth: 1,
+            triangles_per_mesh: 12,
+            meshes: 1,
+            duration_seconds: 1,
+        };
+        let (mut scene, _) = build_scene(&scenario).expect("valid cube grid must build");
+        let before = scene.build_render_frame(WindowSize::new(800, 600)).items[0]
+            .world_transform
+            .transform_point3(Vec3::ZERO);
+
+        animate_cube_grid(&mut scene, 1.0).expect("a valid rotation updates the grid");
+        let after = scene.build_render_frame(WindowSize::new(800, 600)).items[0]
+            .world_transform
+            .transform_point3(Vec3::ZERO);
+
+        assert_ne!(before, after);
+    }
+
+    #[test]
+    fn existing_stress_config_keeps_synthetic_scenes() {
+        let config: Config = serde_json::from_str(include_str!("../docs/stress-config.json"))
+            .expect("the existing benchmark configuration is valid JSON");
+
+        assert!(
+            config
+                .scenarios
+                .iter()
+                .all(|scenario| scenario.scene_kind == SceneKind::Synthetic)
+        );
+        assert!(validate(&config).is_ok());
+    }
+
+    #[test]
+    fn baseline_config_builds_the_full_cube_grid() {
+        let config: Config = serde_json::from_str(include_str!("../docs/stress-baseline.json"))
+            .expect("the bundled baseline configuration is valid JSON");
+        validate(&config).expect("the baseline values match the cube grid requirements");
+        let (scene, resources) =
+            build_scene(&config.scenarios[0]).expect("the baseline scene must build");
+
+        assert_eq!(scene.nodes().len(), 1001);
+        assert_eq!(scene.objects().len(), 1000);
+        assert_eq!(resources.meshes().len(), 1);
+    }
+
+    #[test]
+    fn scaling_config_has_increasing_valid_cube_grids() {
+        let config: Config = serde_json::from_str(include_str!("../docs/stress-scaling.json"))
+            .expect("the bundled scaling configuration is valid JSON");
+        validate(&config).expect("all scaling scenarios use valid cube grids");
+
+        assert!(
+            config
+                .scenarios
+                .iter()
+                .all(|scenario| scenario.scene_kind == SceneKind::CubeGrid)
+        );
+        assert!(
+            config
+                .scenarios
+                .windows(2)
+                .all(|pair| pair[0].objects < pair[1].objects)
+        );
+        assert_eq!(
+            config.scenarios.first().map(|scenario| scenario.objects),
+            Some(250)
+        );
+        assert_eq!(
+            config.scenarios.last().map(|scenario| scenario.objects),
+            Some(12000)
+        );
     }
 }

@@ -1,0 +1,18 @@
+{
+  "width": 1280,
+  "height": 720,
+  "sync_mode": "vsync",
+  "warmup_seconds": 10,
+  "scenarios": [
+    {
+      "name": "cube_grid_1000_shared",
+      "scene_kind": "cube_grid",
+      "objects": 1000,
+      "nodes": 1001,
+      "depth": 1,
+      "triangles_per_mesh": 12,
+      "meshes": 1,
+      "duration_seconds": 60
+    }
+  ]
+}

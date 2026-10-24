@@ -1,0 +1,18 @@
+{
+  "width": 1280,
+  "height": 720,
+  "sync_mode": "vsync",
+  "warmup_seconds": 3,
+  "scenarios": [
+    {"name":"cubes_250","scene_kind":"cube_grid","objects":250,"nodes":251,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_500","scene_kind":"cube_grid","objects":500,"nodes":501,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_1000","scene_kind":"cube_grid","objects":1000,"nodes":1001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_1500","scene_kind":"cube_grid","objects":1500,"nodes":1501,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_2000","scene_kind":"cube_grid","objects":2000,"nodes":2001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_3000","scene_kind":"cube_grid","objects":3000,"nodes":3001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_4000","scene_kind":"cube_grid","objects":4000,"nodes":4001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_6000","scene_kind":"cube_grid","objects":6000,"nodes":6001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_8000","scene_kind":"cube_grid","objects":8000,"nodes":8001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8},
+    {"name":"cubes_12000","scene_kind":"cube_grid","objects":12000,"nodes":12001,"depth":1,"triangles_per_mesh":12,"meshes":1,"duration_seconds":8}
+  ]
+}
