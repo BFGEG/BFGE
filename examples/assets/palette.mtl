@@ -1,0 +1,14 @@
+newmtl coral
+Kd 0.92 0.28 0.22
+
+newmtl teal
+Kd 0.14 0.78 0.72
+
+newmtl gold
+Kd 0.95 0.70 0.18
+
+newmtl violet
+Kd 0.62 0.32 0.88
+
+newmtl slate
+Kd 0.18 0.24 0.34
