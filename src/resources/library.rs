@@ -6,8 +6,7 @@ use crate::math::Vec3;
 use crate::resources::handle::MeshHandle;
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 
-/// Linear RGBA color of the built-in cube. Displays as CSS `lightgray`
-/// (#D3D3D3) on an sRGB swapchain.
+/// Linear RGBA base color of the built-in cube, before scene lighting.
 const CUBE_COLOR: [f32; 4] = [0.65, 0.65, 0.65, 1.0];
 
 /// Corner positions of the six cube faces, in face order +X, -X, +Y, -Y, +Z,

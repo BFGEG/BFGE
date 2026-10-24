@@ -2,12 +2,15 @@
 
 use crate::math::Mat4;
 use crate::resources::handle::MeshHandle;
+use crate::scene::lighting::SceneLighting;
 
 /// Display frame - the data boundary between the scene and the renderer.
 #[derive(Debug, Clone)]
 pub struct RenderFrame {
     /// Frame camera.
     pub camera: RenderCamera,
+    /// Ambient and directional light for this frame.
+    pub lighting: SceneLighting,
     /// Frame items.
     pub items: Vec<RenderItem>,
 }

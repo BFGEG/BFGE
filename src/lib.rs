@@ -14,6 +14,8 @@ pub mod platform;
 pub mod render;
 pub mod resources;
 pub mod scene;
+#[cfg(feature = "stress-benchmark")]
+pub mod stress;
 pub mod systems;
 
 pub use crate::core::api::EngineApi;
@@ -26,6 +28,7 @@ pub use crate::render::system::RenderError;
 pub use crate::scene::api::SceneApi;
 pub use crate::scene::error::SceneError;
 pub use crate::scene::ids::{SceneNodeId, SceneObjectId};
+pub use crate::scene::lighting::{DirectionalLight, SceneLighting};
 pub use crate::scene::transform::Transform;
 pub use crate::scene::viewpoint::ViewpointState;
 pub use crate::systems::loading::ModelLoadError;

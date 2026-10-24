@@ -32,12 +32,26 @@ pub struct WgpuRenderSystem {
     pipeline: Option<MeshPipeline>,
     buffers: MeshBufferCache,
     depth: DepthTarget,
+    present_mode: Option<wgpu::PresentMode>,
 }
 
 impl WgpuRenderSystem {
     /// Creates a wgpu render system.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    #[cfg(feature = "stress-benchmark")]
+    pub(crate) fn with_present_mode(present_mode: wgpu::PresentMode) -> Self {
+        Self {
+            present_mode: Some(present_mode),
+            ..Self::default()
+        }
+    }
+
+    #[cfg(feature = "stress-benchmark")]
+    pub(crate) fn adapter_info(&self) -> Option<wgpu::AdapterInfo> {
+        self.surface.as_ref().map(RenderSurface::adapter_info)
     }
 }
 
@@ -46,7 +60,10 @@ impl RenderSystem for WgpuRenderSystem {
         if self.surface.is_some() {
             Err(RenderError::Initialization(ALREADY_INITIALIZED.to_owned()))
         } else {
-            self.surface = Some(RenderSurface::new(window)?);
+            self.surface = Some(RenderSurface::new_with_present_mode(
+                window,
+                self.present_mode,
+            )?);
             self.pipeline = None;
             self.buffers = MeshBufferCache::default();
             self.depth = DepthTarget::default();
@@ -71,6 +88,7 @@ impl RenderSystem for WgpuRenderSystem {
             pipeline,
             buffers,
             depth,
+            present_mode: _,
         } = self;
         let surface = surface
             .as_mut()
@@ -94,7 +112,11 @@ impl RenderSystem for WgpuRenderSystem {
         };
 
         pipeline.reserve(device, frame.items.len() as u32);
-        pipeline.write_camera(queue, frame.camera.projection * frame.camera.view);
+        pipeline.write_camera(
+            queue,
+            frame.camera.projection * frame.camera.view,
+            frame.lighting,
+        );
         let mut stats = RenderStats::default();
         for (index, item) in frame.items.iter().enumerate() {
             let mesh = buffers.get(device, resources, item.mesh)?;
@@ -157,6 +179,7 @@ impl RenderSystem for WgpuRenderSystem {
 mod tests {
     use crate::math::Mat4;
     use crate::render::frame::RenderCamera;
+    use crate::scene::lighting::SceneLighting;
 
     use super::*;
 
@@ -176,6 +199,7 @@ mod tests {
                 view: Mat4::IDENTITY,
                 projection: Mat4::IDENTITY,
             },
+            lighting: SceneLighting::default(),
             items: Vec::new(),
         };
         assert!(matches!(backend.render(&frame, &ResourceManager::new()),
