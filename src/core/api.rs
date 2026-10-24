@@ -20,7 +20,7 @@ pub trait EngineApi {
     ///
     /// The window is created by the engine; the client does not manage the
     /// windowing or graphics platform. The initial scene contains a root node
-    /// and a viewpoint with default values, but no scene objects.
+    /// and a viewpoint and lighting with default values, but no scene objects.
     fn initialize(&mut self, window: WindowDescriptor) -> Result<(), EngineError>;
 
     /// Runs the engine's main loop until the window is closed.
