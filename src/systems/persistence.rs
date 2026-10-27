@@ -12,7 +12,7 @@ use crate::scene::object::SceneObject;
 use crate::scene::transform::Transform;
 use crate::scene::viewpoint::ViewpointState;
 
-/// Storage for a single saved scene (version 1 - in engine memory).
+/// In-memory storage for one saved scene.
 ///
 /// The store lives for the whole engine lifetime and survives `shutdown`;
 /// it is shared between sessions because the engine lives longer than a
@@ -228,25 +228,24 @@ pub enum ScenePersistenceError {
     /// The scene is not empty: restore is only possible into an empty scene.
     #[error("scene is not empty: restore is only possible into an empty scene")]
     SceneNotEmpty,
-    /// Failed to save the scene.
-    #[error("failed to save the scene: {0}")]
+    /// Failed to capture a scene snapshot.
+    #[error("failed to capture a scene snapshot: {0}")]
     Save(String),
     /// Failed to restore the scene.
     #[error("failed to restore the scene: {0}")]
     Restore(String),
 }
 
-/// Saves the full scene state (replaces the previous save).
+/// Saves the full scene state, replacing the previous snapshot.
 ///
 /// Captures the scene tree, the objects, the registered meshes and the
-/// viewpoint and lighting. The previous save is replaced only after the new state has been
-/// fully captured, so a failed save never destroys an earlier save. In-memory
-/// saving cannot fail; [`ScenePersistenceError::Save`] is reserved for the
-/// file-backed version (milestone 2).
+/// viewpoint and lighting. The previous save is replaced only after the new
+/// state has been fully captured, so a failed save never destroys an earlier
+/// save.
 ///
 /// # Errors
 ///
-/// This function is infallible in version 1.
+/// This operation currently has no failure path.
 pub fn save_scene(
     store: &mut SceneStore,
     scene: &SceneManager,

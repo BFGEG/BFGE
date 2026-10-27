@@ -8,7 +8,7 @@ stress-benchmark = []
 
 [[bin]]
 name = "bfge-stress"
-path = "src/bin/bfge_stress.rs"
+path = "benchmark/bfge_stress.rs"
 required-features = ["stress-benchmark"]
 
 [dependencies]

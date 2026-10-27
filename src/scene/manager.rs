@@ -37,10 +37,9 @@ impl SceneManager {
 
     /// Engine-internal operation: creates a scene object.
     ///
-    /// Object IDs are monotonic and never reused; this holds because v1 does
-    /// not delete nodes or objects (§6.2). The caller must ensure `mesh` refers
-    /// to a registered mesh: `SceneManager` cannot validate handles (§29).
-    #[allow(dead_code)] // called by [SYS]
+    /// Object IDs are allocated in order and are not reused. The caller must
+    /// provide a handle registered with the resource manager.
+    #[allow(dead_code)]
     pub(crate) fn create_object(
         &mut self,
         mesh: MeshHandle,
@@ -62,7 +61,7 @@ impl SceneManager {
     /// The camera comes from the viewpoint and the window size. The scene tree
     /// is traversed from the root, accumulating world transforms, and every
     /// attached object becomes a [`RenderItem`].
-    #[allow(dead_code)] // called by [CORE] (milestone 2)
+    #[allow(dead_code)]
     pub(crate) fn build_render_frame(&self, size: WindowSize) -> RenderFrame {
         let aspect_ratio = if size.height == 0 {
             1.0

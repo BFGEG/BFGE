@@ -1,7 +1,7 @@
-//! FREAK Engine (BFGE) - a Rust graphics engine.
+//! BFGE is a Rust graphics engine for rendering static 3D scenes in a desktop window.
 //!
-//! Public contract - `FREAK_Engine_Public_API.md`;
-//! internal skeleton - `docs/FREAK_Engine_Architecture.md`.
+//! The repository README introduces the engine. The `docs` directory describes its
+//! architecture, public API, rendering backend, and benchmark methodology.
 
 #![warn(missing_docs)]
 // `BFGE` is a product name, not a variable/module; the crate must not be renamed.
@@ -15,6 +15,7 @@ pub mod render;
 pub mod resources;
 pub mod scene;
 #[cfg(feature = "stress-benchmark")]
+#[path = "../benchmark/stress.rs"]
 pub mod stress;
 pub mod systems;
 

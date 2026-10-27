@@ -2,14 +2,14 @@
 
 use crate::math::Vec3;
 
-/// State of the single viewpoint.
+/// Position, direction and perspective field of view of the scene viewpoint.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ViewpointState {
-    /// Viewpoint position.
+    /// Viewpoint position in scene coordinates.
     pub position: Vec3,
-    /// View direction.
+    /// Direction in which the viewpoint looks; it is used as provided.
     pub direction: Vec3,
-    /// Vertical field of view, radians.
+    /// Vertical field of view in radians; it is used as provided.
     pub fov_y: f32,
 }
 

@@ -60,12 +60,10 @@ pub(crate) enum BuiltinMesh {
     Cube,
 }
 
-/// Library of built-in (procedural) meshes.
+/// Internal registry and builder for procedural meshes.
 ///
-/// Supplies ready-made geometry (currently a unit cube) as a temporary source
-/// of meshes until file loading (`load_model`) is implemented. In v1 the only
-/// client path for creating scene objects is `load_model`; creating objects
-/// from built-in meshes is a post-v1 feature (§13.3).
+/// The registry currently provides a unit cube and is used by the resource
+/// manager to reuse built-in geometry.
 #[derive(Debug, Default)]
 pub struct MeshLibrary {
     meshes: HashMap<BuiltinMesh, MeshHandle>,
