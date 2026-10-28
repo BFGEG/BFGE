@@ -18,7 +18,7 @@ use crate::scene::viewpoint::ViewpointState;
 pub struct SceneManager {
     root: SceneNodeId,
     nodes: Vec<SceneNode>,
-    objects: Vec<SceneObject>,
+    objects: Vec<Option<SceneObject>>,
     viewpoint: ViewpointState,
     lighting: SceneLighting,
 }
@@ -50,7 +50,7 @@ impl SceneManager {
         }
 
         let id = SceneObjectId(self.objects.len() as u32);
-        self.objects.push(SceneObject::new(mesh));
+        self.objects.push(Some(SceneObject::new(mesh)));
         self.nodes[parent.0 as usize].objects.push(id);
 
         Ok(id)
@@ -92,7 +92,7 @@ impl SceneManager {
         let world = parent_world * current.local_transform.matrix();
 
         for object in &current.objects {
-            if let Some(object) = self.objects.get(object.0 as usize) {
+            if let Some(object) = self.objects.get(object.0 as usize).and_then(Option::as_ref) {
                 items.push(RenderItem {
                     world_transform: world,
                     mesh: object.mesh,
@@ -110,8 +110,8 @@ impl SceneManager {
         &self.nodes
     }
 
-    /// Returns all scene objects.
-    pub(crate) fn objects(&self) -> &[SceneObject] {
+    /// Returns object slots, retaining empty slots for removed identifiers.
+    pub(crate) fn objects(&self) -> &[Option<SceneObject>] {
         &self.objects
     }
 
@@ -119,7 +119,7 @@ impl SceneManager {
     pub(crate) fn restore(
         &mut self,
         nodes: Vec<SceneNode>,
-        objects: Vec<SceneObject>,
+        objects: Vec<Option<SceneObject>>,
         viewpoint: ViewpointState,
         lighting: SceneLighting,
     ) {
@@ -170,12 +170,43 @@ impl SceneApi for SceneManager {
         Ok(())
     }
 
+    fn clone_object(
+        &mut self,
+        object: SceneObjectId,
+        parent: SceneNodeId,
+    ) -> Result<SceneObjectId, SceneError> {
+        let source = self
+            .objects
+            .get(object.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or(SceneError::UnknownObject(object))?;
+        self.create_object(source.mesh, parent)
+    }
+
+    fn remove_object(&mut self, object: SceneObjectId) -> Result<(), SceneError> {
+        let slot = self
+            .objects
+            .get_mut(object.0 as usize)
+            .filter(|slot| slot.is_some())
+            .ok_or(SceneError::UnknownObject(object))?;
+        *slot = None;
+        for node in &mut self.nodes {
+            node.objects.retain(|candidate| *candidate != object);
+        }
+        Ok(())
+    }
+
     fn reparent_object(
         &mut self,
         object: SceneObjectId,
         new_parent: SceneNodeId,
     ) -> Result<(), SceneError> {
-        if self.objects.get(object.0 as usize).is_none() {
+        if self
+            .objects
+            .get(object.0 as usize)
+            .and_then(Option::as_ref)
+            .is_none()
+        {
             return Err(SceneError::UnknownObject(object));
         }
         if new_parent.0 as usize >= self.nodes.len() {

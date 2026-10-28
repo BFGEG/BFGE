@@ -12,11 +12,21 @@
 | [`city_flyover`](city_flyover.rs) | Облёт города из 144 зданий при изменении света. | `cargo run --release --locked --example city_flyover` |
 | [`spiral_sculpture`](spiral_sculpture.rs) | Облёт спирали из 96 цветных ступеней, которая вращается вокруг центра. | `cargo run --release --locked --example spiral_sculpture` |
 | [`depth_corridor`](depth_corridor.rs) | Полёт через 30 цветных арок и обратный пролёт. | `cargo run --release --locked --example depth_corridor` |
+| [`runtime_objects`](runtime_objects.rs) | Создание и удаление экземпляров с общей геометрией, движение, вращение и масштабирование в заранее созданных узлах. | `cargo run --locked --example runtime_objects` |
+| [`runtime_model_loading`](runtime_model_loading.rs) | Последовательная загрузка трёх моделей во время `run()`, удаление предыдущей и анимация текущей. | `cargo run --locked --example runtime_model_loading` |
 
 Укажите собственную модель аргументом `rotating_model`:
 
 ```bash
 cargo run --locked --example rotating_model -- path/to/model.obj
+```
+
+Для последовательной загрузки собственных моделей во время работы передайте
+один или несколько путей. Каждый файл загружается один раз с интервалом в три
+секунды; последняя модель остаётся в окне:
+
+```bash
+cargo run --locked --example runtime_model_loading -- path/to/first.obj path/to/second.glb
 ```
 
 Пути считаются от текущего рабочего каталога. Поддерживаемые форматы импорта

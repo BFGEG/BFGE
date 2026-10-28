@@ -110,7 +110,8 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
     let pivot = build_spiral(engine)?;
     let mut elapsed = 0.0_f32;
     engine.add_event(EngineEvent {
-        frame_started: Box::new(move |scene, time| {
+        frame_started: Box::new(move |context, time| {
+            let scene = context.scene();
             elapsed = (elapsed + time.time_since_last_frame).rem_euclid(TOUR_SECONDS);
             let angle = elapsed * TAU / TOUR_SECONDS;
             scene.set_viewpoint(camera_at(elapsed))?;
@@ -121,10 +122,12 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
                     color: Vec3::new(0.55, 0.75, 1.0),
                 },
             })?;
-            scene.set_node_transform(
-                pivot,
-                Transform::from_rotation(Quat::from_rotation_y(angle * 2.0)),
-            )
+            scene
+                .set_node_transform(
+                    pivot,
+                    Transform::from_rotation(Quat::from_rotation_y(angle * 2.0)),
+                )
+                .map_err(Into::into)
         }),
         frame_ended: Box::new(|_, _| Ok(())),
     })?;

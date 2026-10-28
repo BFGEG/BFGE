@@ -15,6 +15,8 @@ use super::*;
 
 const BACKEND_FAILURE: &str = "test backend failure";
 const TEST_WINDOW_TITLE: &str = "Engine lifecycle test";
+const TEST_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/cube.obj");
+const UNSUPPORTED_EXTENSION: &str = "unsupported";
 const TEST_SIZE: WindowSize = WindowSize {
     width: 800,
     height: 600,
@@ -246,11 +248,10 @@ fn event_registration_retains_handlers_without_calling_them() {
         time_since_last_event: 0.0,
         time_since_last_frame: 0.0,
     };
+    let mut context = FrameContext::new(&mut engine.parts.scene, &mut engine.parts.resources);
     for event in engine.event_loop.callbacks() {
-        (event.frame_started)(&mut engine.parts.scene, &time)
-            .expect("the registered test handler succeeds");
-        (event.frame_ended)(&mut engine.parts.scene, &time)
-            .expect("the registered test handler succeeds");
+        (event.frame_started)(&mut context, &time).expect("the registered test handler succeeds");
+        (event.frame_ended)(&mut context, &time).expect("the registered test handler succeeds");
     }
     assert_eq!(
         *calls.borrow(),
@@ -476,8 +477,11 @@ fn frame_started_scene_changes_reach_the_current_frame() {
     let translation = Vec3::new(1.0, 2.0, -3.0);
     engine
         .add_event(EngineEvent {
-            frame_started: Box::new(move |scene, _| {
-                scene.set_node_transform(root, Transform::from_translation(translation))
+            frame_started: Box::new(move |context, _| {
+                let scene = context.scene();
+                scene
+                    .set_node_transform(root, Transform::from_translation(translation))
+                    .map_err(Into::into)
             }),
             frame_ended: Box::new(|_, _| Ok(())),
         })
@@ -497,16 +501,159 @@ fn frame_started_scene_changes_reach_the_current_frame() {
 }
 
 #[test]
+fn frame_started_can_load_and_place_a_model_in_the_current_frame() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    let child = engine.scene().create_node(root).unwrap();
+    let translation = Vec3::new(1.0, 2.0, -3.0);
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                context.load_model(Path::new(TEST_MODEL), child)?;
+                context
+                    .scene()
+                    .set_node_transform(child, Transform::from_translation(translation))?;
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+
+    run_batches(&mut engine, [vec![], vec![PlatformEvent::CloseRequested]]).unwrap();
+
+    let state = state.borrow();
+    assert_eq!(state.frames[0].items.len(), 1);
+    assert_eq!(
+        state.frames[0].items[0].world_transform,
+        crate::math::Mat4::from_translation(translation)
+    );
+    assert_eq!(engine.parts.scene.nodes().len(), 2);
+    assert_eq!(engine.parts.resources.meshes().len(), 1);
+}
+
+#[test]
+fn frame_ended_model_loading_is_visible_in_the_next_frame() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    let mut loaded = false;
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|_, _| Ok(())),
+            frame_ended: Box::new(move |context, _| {
+                if !loaded {
+                    context.load_model(Path::new(TEST_MODEL), root)?;
+                    loaded = true;
+                }
+                Ok(())
+            }),
+        })
+        .unwrap();
+
+    run_batches(
+        &mut engine,
+        [vec![], vec![], vec![PlatformEvent::CloseRequested]],
+    )
+    .unwrap();
+
+    let state = state.borrow();
+    assert!(state.frames[0].items.is_empty());
+    assert_eq!(state.frames[1].items.len(), 1);
+}
+
+#[test]
+fn frame_started_removal_excludes_the_object_from_the_current_frame() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    let object = engine.load_model(Path::new(TEST_MODEL), root).unwrap();
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                context.scene().remove_object(object)?;
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+
+    run_batches(&mut engine, [vec![], vec![PlatformEvent::CloseRequested]]).unwrap();
+
+    assert!(state.borrow().frames[0].items.is_empty());
+    assert!(engine.scene().remove_object(object).is_err());
+}
+
+#[test]
+fn frame_ended_removal_is_visible_in_the_next_frame() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    let mut object = Some(engine.load_model(Path::new(TEST_MODEL), root).unwrap());
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|_, _| Ok(())),
+            frame_ended: Box::new(move |context, _| {
+                if let Some(object) = object.take() {
+                    context.scene().remove_object(object)?;
+                }
+                Ok(())
+            }),
+        })
+        .unwrap();
+
+    run_batches(
+        &mut engine,
+        [vec![], vec![], vec![PlatformEvent::CloseRequested]],
+    )
+    .unwrap();
+
+    let state = state.borrow();
+    assert_eq!(state.frames[0].items.len(), 1);
+    assert!(state.frames[1].items.is_empty());
+}
+
+#[test]
+fn runtime_load_failure_preserves_source_and_state_and_stops_the_loop() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                context.load_model(
+                    Path::new(TEST_MODEL)
+                        .with_extension(UNSUPPORTED_EXTENSION)
+                        .as_path(),
+                    root,
+                )?;
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+    register_recorders(&mut engine, &state);
+
+    let result = run_batches(&mut engine, [vec![]]);
+
+    assert!(matches!(
+        result,
+        Err(EngineError::ModelLoad(ModelLoadError::UnsupportedFormat(_)))
+    ));
+    assert!(state.borrow().calls.is_empty());
+    assert!(engine.parts.scene.objects().is_empty());
+    assert!(engine.parts.resources.meshes().is_empty());
+    assert!(!engine.event_loop.is_running());
+    assert_eq!(engine.event_loop.callbacks().len(), 3);
+}
+
+#[test]
 fn frame_ended_scene_changes_reach_the_next_frame() {
     let (mut engine, state) = initialized_engine();
     let initial_camera = engine.parts.scene.build_render_frame(TEST_SIZE).camera;
     engine
         .add_event(EngineEvent {
             frame_started: Box::new(|_, _| Ok(())),
-            frame_ended: Box::new(|scene, _| {
+            frame_ended: Box::new(|context, _| {
+                let scene = context.scene();
                 let mut viewpoint = scene.viewpoint();
                 viewpoint.position += Vec3::X;
-                scene.set_viewpoint(viewpoint)
+                scene.set_viewpoint(viewpoint).map_err(Into::into)
             }),
         })
         .expect("frame handler registration succeeds");
@@ -530,9 +677,10 @@ fn frame_started_error_preserves_cause_and_skips_remaining_steps() {
     let translation = Vec3::X;
     engine
         .add_event(EngineEvent {
-            frame_started: Box::new(move |scene, _| {
+            frame_started: Box::new(move |context, _| {
+                let scene = context.scene();
                 scene.set_node_transform(root, Transform::from_translation(translation))?;
-                Err(crate::SceneError::UnknownNode(SceneNodeId(42)))
+                Err(crate::SceneError::UnknownNode(SceneNodeId(42)).into())
             }),
             frame_ended: Box::new(|_, _| Ok(())),
         })
@@ -583,7 +731,7 @@ fn frame_ended_error_preserves_cause_and_skips_later_handlers() {
     engine
         .add_event(EngineEvent {
             frame_started: Box::new(|_, _| Ok(())),
-            frame_ended: Box::new(|_, _| Err(crate::SceneError::InvalidReparent)),
+            frame_ended: Box::new(|_, _| Err(crate::SceneError::InvalidReparent.into())),
         })
         .expect("frame handler registration succeeds");
     register_recorders(&mut engine, &state);
@@ -842,23 +990,30 @@ fn native_engine_loads_model_and_drives_frames() -> Result<(), Box<dyn std::erro
     engine.initialize_platform(platform)?;
     let root = engine.scene().root_node();
     let node = engine.scene().create_node(root)?;
-    engine.load_model(
-        Path::new(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/examples/assets/cube.obj"
-        )),
-        node,
-    )?;
+    let mut object = None;
+    let mut frame = 0;
     let completed = Rc::new(RefCell::new(0));
     let ended = Rc::clone(&completed);
     engine.add_event(EngineEvent {
-        frame_started: Box::new(move |scene, _| {
-            scene.set_node_transform(node, Transform::from_euler(Vec3::new(0.2, 0.4, 0.0)))
+        frame_started: Box::new(move |context, _| {
+            frame += 1;
+            if frame == 1 {
+                object = Some(context.load_model(Path::new(TEST_MODEL), node)?);
+            } else if let Some(previous) = object.take() {
+                if frame == 2 {
+                    object = Some(context.scene().clone_object(previous, node)?);
+                }
+                context.scene().remove_object(previous)?;
+            }
+            let scene = context.scene();
+            scene
+                .set_node_transform(node, Transform::from_euler(Vec3::new(0.2, 0.4, 0.0)))
+                .map_err(Into::into)
         }),
         frame_ended: Box::new(move |_, _| {
             *ended.borrow_mut() += 1;
             if *ended.borrow() == 3 {
-                Err(crate::SceneError::InvalidReparent)
+                Err(crate::SceneError::InvalidReparent.into())
             } else {
                 Ok(())
             }

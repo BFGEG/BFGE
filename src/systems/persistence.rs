@@ -33,7 +33,7 @@ impl SceneStore {
 #[derive(Clone)]
 struct SavedScene {
     nodes: Vec<SavedNode>,
-    objects: Vec<SavedObject>,
+    objects: Vec<Option<SavedObject>>,
     meshes: Vec<Mesh>,
     viewpoint: ViewpointState,
     lighting: SceneLighting,
@@ -147,7 +147,12 @@ impl SavedScene {
                 }
             }
             for object in &node.objects {
-                if object.0 as usize >= object_count {
+                if self
+                    .objects
+                    .get(object.0 as usize)
+                    .and_then(Option::as_ref)
+                    .is_none()
+                {
                     return Err(format!(
                         "node {index} references unknown object {}",
                         object.0
@@ -197,7 +202,7 @@ impl SavedScene {
             }
         }
 
-        for object in &self.objects {
+        for object in self.objects.iter().flatten() {
             if object.mesh.index() as usize >= mesh_count {
                 return Err(format!(
                     "object references unknown mesh index {} (have {mesh_count} meshes)",
@@ -209,14 +214,18 @@ impl SavedScene {
         Ok(())
     }
 
-    fn to_scene_parts(&self) -> (Vec<SceneNode>, Vec<SceneObject>) {
+    fn to_scene_parts(&self) -> (Vec<SceneNode>, Vec<Option<SceneObject>>) {
         let nodes = self
             .nodes
             .iter()
             .cloned()
             .map(SavedNode::into_node)
             .collect();
-        let objects = self.objects.iter().map(|obj| obj.into_object()).collect();
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| object.map(SavedObject::into_object))
+            .collect();
         (nodes, objects)
     }
 }
@@ -256,7 +265,7 @@ pub fn save_scene(
         objects: scene
             .objects()
             .iter()
-            .map(SavedObject::from_object)
+            .map(|object| object.as_ref().map(SavedObject::from_object))
             .collect(),
         meshes: resources.meshes().to_vec(),
         viewpoint: scene.viewpoint(),
@@ -281,7 +290,7 @@ pub fn restore_scene(
     scene: &mut SceneManager,
     resources: &mut ResourceManager,
 ) -> Result<(), ScenePersistenceError> {
-    if !scene.objects().is_empty() {
+    if scene.objects().iter().any(Option::is_some) {
         return Err(ScenePersistenceError::SceneNotEmpty);
     }
     let Some(saved) = store.saved.as_ref() else {
@@ -305,6 +314,84 @@ mod tests {
 
     const TEST_WIDTH: u32 = 800;
     const TEST_HEIGHT: u32 = 600;
+
+    #[test]
+    fn snapshot_preserves_removed_ids_and_shared_instances() {
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let root = scene.root_node();
+        let removed = scene.create_object(mesh, root).unwrap();
+        let survivor = scene.clone_object(removed, root).unwrap();
+        scene.remove_object(removed).unwrap();
+        let mut store = SceneStore::new();
+        save_scene(&mut store, &scene, &resources).unwrap();
+        let before = scene.build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT));
+        let mut restored = SceneManager::new();
+        let mut restored_resources = ResourceManager::new();
+
+        restore_scene(&mut store, &mut restored, &mut restored_resources).unwrap();
+
+        assert_eq!(
+            restored
+                .build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT))
+                .items,
+            before.items
+        );
+        assert!(restored.remove_object(removed).is_err());
+        let instance = restored.clone_object(survivor, root).unwrap();
+        assert_ne!(instance, removed);
+        assert_ne!(instance, survivor);
+        assert_eq!(restored_resources.meshes().len(), 1);
+    }
+
+    #[test]
+    fn restore_accepts_scene_after_all_objects_have_been_removed() {
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let root = scene.root_node();
+        let object = scene.create_object(mesh, root).unwrap();
+        let mut store = SceneStore::new();
+        save_scene(&mut store, &scene, &resources).unwrap();
+        scene.remove_object(object).unwrap();
+
+        restore_scene(&mut store, &mut scene, &mut resources).unwrap();
+
+        assert_eq!(
+            scene
+                .build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT))
+                .items
+                .len(),
+            1
+        );
+        scene.remove_object(object).unwrap();
+    }
+
+    #[test]
+    fn snapshot_with_reference_to_removed_object_is_rejected() {
+        let mut store = SceneStore {
+            saved: Some(SavedScene {
+                nodes: vec![SavedNode {
+                    objects: vec![SceneObjectId(0)],
+                    ..SavedNode::from_node(&SceneNode::default())
+                }],
+                objects: vec![None],
+                meshes: Vec::new(),
+                viewpoint: ViewpointState::default(),
+                lighting: SceneLighting::default(),
+            }),
+        };
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+
+        assert!(matches!(
+            restore_scene(&mut store, &mut scene, &mut resources),
+            Err(ScenePersistenceError::Restore(_))
+        ));
+        assert!(scene.objects().is_empty());
+        assert!(resources.meshes().is_empty());
+    }
 
     #[test]
     fn save_and_restore_round_trips_scene_and_render_frame() {

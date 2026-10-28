@@ -24,6 +24,121 @@ fn world_origin(item: &RenderItem) -> Vec3 {
 }
 
 #[test]
+fn clone_object_shares_geometry_and_inherits_the_target_transform() {
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let mesh = add_cube(&mut resources);
+    let root = scene.root_node();
+    let child = scene.create_node(root).unwrap();
+    scene
+        .set_node_transform(child, Transform::from_translation(Vec3::X))
+        .unwrap();
+    let source = scene.create_object(mesh, root).unwrap();
+
+    let instance = scene.clone_object(source, child).unwrap();
+    let frame = scene.build_render_frame(WINDOW);
+
+    assert_ne!(source, instance);
+    assert_eq!(resources.meshes().len(), 1);
+    assert_eq!(frame.items.len(), 2);
+    assert_eq!(frame.items[0].mesh, frame.items[1].mesh);
+    assert_eq!(world_origin(&frame.items[1]), Vec3::X);
+}
+
+#[test]
+fn clone_object_rejects_unknown_source_without_changes() {
+    let mut scene = SceneManager::new();
+    let root = scene.root_node();
+
+    assert!(matches!(
+        scene.clone_object(SceneObjectId(99), root),
+        Err(SceneError::UnknownObject(SceneObjectId(99)))
+    ));
+    assert!(scene.objects().is_empty());
+    assert!(scene.nodes()[0].objects.is_empty());
+}
+
+#[test]
+fn clone_object_rejects_unknown_parent_without_changes() {
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let mesh = add_cube(&mut resources);
+    let root = scene.root_node();
+    let source = scene.create_object(mesh, root).unwrap();
+    let before = scene.build_render_frame(WINDOW);
+
+    assert!(matches!(
+        scene.clone_object(source, SceneNodeId(99)),
+        Err(SceneError::UnknownNode(SceneNodeId(99)))
+    ));
+    assert_eq!(scene.build_render_frame(WINDOW).items, before.items);
+    assert_eq!(scene.objects().len(), 1);
+}
+
+#[test]
+fn remove_object_preserves_other_instances_and_the_hierarchy() {
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let mesh = add_cube(&mut resources);
+    let root = scene.root_node();
+    let child = scene.create_node(root).unwrap();
+    let source = scene.create_object(mesh, root).unwrap();
+    let instance = scene.clone_object(source, child).unwrap();
+
+    scene.remove_object(source).unwrap();
+    let frame = scene.build_render_frame(WINDOW);
+
+    assert_eq!(frame.items.len(), 1);
+    assert_eq!(frame.items[0].mesh, mesh);
+    assert_eq!(scene.nodes().len(), 2);
+    assert_eq!(scene.nodes()[0].children, [child]);
+    assert!(scene.nodes()[0].objects.is_empty());
+    assert_eq!(scene.nodes()[child.0 as usize].objects, [instance]);
+    assert!(resources.mesh(mesh).is_some());
+}
+
+#[test]
+fn removed_identifiers_stay_invalid_after_creating_another_object() {
+    let mut scene = SceneManager::new();
+    let mut resources = ResourceManager::new();
+    let mesh = add_cube(&mut resources);
+    let root = scene.root_node();
+    let removed = scene.create_object(mesh, root).unwrap();
+    let survivor = scene.create_object(mesh, root).unwrap();
+    scene.remove_object(removed).unwrap();
+
+    let new_object = scene.clone_object(survivor, root).unwrap();
+
+    assert_ne!(removed, new_object);
+    assert_ne!(survivor, new_object);
+    assert!(matches!(
+        scene.remove_object(removed),
+        Err(SceneError::UnknownObject(id)) if id == removed
+    ));
+    assert!(matches!(
+        scene.clone_object(removed, root),
+        Err(SceneError::UnknownObject(id)) if id == removed
+    ));
+    assert!(matches!(
+        scene.reparent_object(removed, root),
+        Err(SceneError::UnknownObject(id)) if id == removed
+    ));
+    assert_eq!(scene.build_render_frame(WINDOW).items.len(), 2);
+}
+
+#[test]
+fn remove_object_rejects_unknown_identifier_without_changes() {
+    let mut scene = SceneManager::new();
+
+    assert!(matches!(
+        scene.remove_object(SceneObjectId(99)),
+        Err(SceneError::UnknownObject(SceneObjectId(99)))
+    ));
+    assert!(scene.objects().is_empty());
+    assert!(scene.nodes()[0].objects.is_empty());
+}
+
+#[test]
 fn new_scene_has_a_root_without_parent() {
     let scene = SceneManager::new();
     let root = scene.root_node();

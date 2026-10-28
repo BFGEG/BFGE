@@ -42,6 +42,32 @@ pub trait SceneApi {
         transform: Transform,
     ) -> Result<(), SceneError>;
 
+    /// Creates an instance of `object` under `parent`, sharing its mesh.
+    ///
+    /// The new object inherits the target node's transform. No geometry is
+    /// copied. The returned identifier is new and is not reused after removal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] or [`SceneError::UnknownNode`] for
+    /// an unknown or removed source or an unknown parent, without changes.
+    fn clone_object(
+        &mut self,
+        object: SceneObjectId,
+        parent: SceneNodeId,
+    ) -> Result<SceneObjectId, SceneError>;
+
+    /// Removes `object` from the scene, leaving its node and shared mesh intact.
+    ///
+    /// The removed identifier becomes invalid. Other object identifiers and
+    /// instances of the mesh are unaffected. Mesh resources live until shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] for an unknown or removed object,
+    /// without changing the scene.
+    fn remove_object(&mut self, object: SceneObjectId) -> Result<(), SceneError>;
+
     /// Reparents an object to another node.
     ///
     /// After reparenting, the object's position, rotation and scale are

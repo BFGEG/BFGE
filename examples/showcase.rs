@@ -140,18 +140,21 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
     let hero = build_scene(engine)?;
     let mut elapsed = 0.0_f32;
     engine.add_event(EngineEvent {
-        frame_started: Box::new(move |scene, time| {
+        frame_started: Box::new(move |context, time| {
+            let scene = context.scene();
             elapsed = (elapsed + time.time_since_last_frame).rem_euclid(CYCLE_SECONDS);
             scene.set_viewpoint(camera_at(elapsed))?;
             scene.set_lighting(lighting_at(elapsed))?;
-            scene.set_node_transform(
-                hero,
-                Transform {
-                    translation: HERO_CENTER,
-                    rotation: Quat::from_rotation_y(elapsed * 0.8),
-                    scale: Vec3::ONE,
-                },
-            )
+            scene
+                .set_node_transform(
+                    hero,
+                    Transform {
+                        translation: HERO_CENTER,
+                        rotation: Quat::from_rotation_y(elapsed * 0.8),
+                        scale: Vec3::ONE,
+                    },
+                )
+                .map_err(Into::into)
         }),
         frame_ended: Box::new(|_, _| Ok(())),
     })?;
