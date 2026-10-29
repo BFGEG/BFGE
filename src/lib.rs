@@ -1,4 +1,4 @@
-//! BFGE is a Rust graphics engine for rendering static 3D scenes in a desktop window.
+//! BFGE is a Rust graphics engine for rendering editable 3D scenes in a desktop window.
 //!
 //! The repository README introduces the engine. The `docs` directory describes its
 //! architecture, public API, rendering backend, and benchmark methodology.
@@ -23,6 +23,7 @@ pub use crate::core::api::EngineApi;
 pub use crate::core::engine::Engine;
 pub use crate::core::engine_loop::{EngineEvent, EventTime};
 pub use crate::core::error::EngineError;
+pub use crate::core::frame_context::FrameContext;
 pub use crate::platform::{WindowDescriptor, WindowSize};
 pub use crate::render::stats::RenderStats;
 pub use crate::render::system::RenderError;

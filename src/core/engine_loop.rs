@@ -3,9 +3,9 @@
 use std::collections::VecDeque;
 use std::time::Instant;
 
+use crate::core::error::EngineError;
+use crate::core::frame_context::FrameContext;
 use crate::platform::WindowSize;
-use crate::scene::api::SceneApi;
-use crate::scene::error::SceneError;
 
 /// The engine's main loop.
 ///
@@ -110,10 +110,11 @@ pub struct EventTime {
 }
 
 /// Signature of a user frame handler.
-pub type FrameHandler = Box<dyn FnMut(&mut dyn SceneApi, &EventTime) -> Result<(), SceneError>>;
+pub type FrameHandler =
+    Box<dyn FnMut(&mut FrameContext<'_>, &EventTime) -> Result<(), EngineError>>;
 
 /// User frame handlers, called by the loop on every pass in registration
-/// order, with access to the scene and frame times.
+/// order, with access to the scene, model loading and frame times.
 pub struct EngineEvent {
     /// Called before frame build.
     pub frame_started: FrameHandler,

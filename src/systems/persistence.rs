@@ -8,7 +8,7 @@ use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::scene::lighting::SceneLighting;
 use crate::scene::manager::SceneManager;
 use crate::scene::node::SceneNode;
-use crate::scene::object::SceneObject;
+use crate::scene::object::{SceneObject, validate_color};
 use crate::scene::transform::Transform;
 use crate::scene::viewpoint::ViewpointState;
 
@@ -33,7 +33,7 @@ impl SceneStore {
 #[derive(Clone)]
 struct SavedScene {
     nodes: Vec<SavedNode>,
-    objects: Vec<SavedObject>,
+    objects: Vec<Option<SavedObject>>,
     meshes: Vec<Mesh>,
     viewpoint: ViewpointState,
     lighting: SceneLighting,
@@ -68,19 +68,29 @@ impl SavedNode {
     }
 }
 
-/// A saved scene object: the handle of the mesh it instances.
+/// A saved mesh instance with its visibility and individual color override.
 #[derive(Clone, Copy)]
 struct SavedObject {
     mesh: MeshHandle,
+    visible: bool,
+    color_override: Option<[f32; 3]>,
 }
 
 impl SavedObject {
     fn from_object(object: &SceneObject) -> Self {
-        Self { mesh: object.mesh }
+        Self {
+            mesh: object.mesh,
+            visible: object.visible,
+            color_override: object.color_override,
+        }
     }
 
     fn into_object(self) -> SceneObject {
-        SceneObject::new(self.mesh)
+        SceneObject {
+            mesh: self.mesh,
+            visible: self.visible,
+            color_override: self.color_override,
+        }
     }
 }
 
@@ -147,7 +157,12 @@ impl SavedScene {
                 }
             }
             for object in &node.objects {
-                if object.0 as usize >= object_count {
+                if self
+                    .objects
+                    .get(object.0 as usize)
+                    .and_then(Option::as_ref)
+                    .is_none()
+                {
                     return Err(format!(
                         "node {index} references unknown object {}",
                         object.0
@@ -197,7 +212,10 @@ impl SavedScene {
             }
         }
 
-        for object in &self.objects {
+        for object in self.objects.iter().flatten() {
+            if let Some(color) = object.color_override {
+                validate_color(color).map_err(|error| error.to_string())?;
+            }
             if object.mesh.index() as usize >= mesh_count {
                 return Err(format!(
                     "object references unknown mesh index {} (have {mesh_count} meshes)",
@@ -209,14 +227,18 @@ impl SavedScene {
         Ok(())
     }
 
-    fn to_scene_parts(&self) -> (Vec<SceneNode>, Vec<SceneObject>) {
+    fn to_scene_parts(&self) -> (Vec<SceneNode>, Vec<Option<SceneObject>>) {
         let nodes = self
             .nodes
             .iter()
             .cloned()
             .map(SavedNode::into_node)
             .collect();
-        let objects = self.objects.iter().map(|obj| obj.into_object()).collect();
+        let objects = self
+            .objects
+            .iter()
+            .map(|object| object.map(SavedObject::into_object))
+            .collect();
         (nodes, objects)
     }
 }
@@ -256,7 +278,7 @@ pub fn save_scene(
         objects: scene
             .objects()
             .iter()
-            .map(SavedObject::from_object)
+            .map(|object| object.as_ref().map(SavedObject::from_object))
             .collect(),
         meshes: resources.meshes().to_vec(),
         viewpoint: scene.viewpoint(),
@@ -281,7 +303,7 @@ pub fn restore_scene(
     scene: &mut SceneManager,
     resources: &mut ResourceManager,
 ) -> Result<(), ScenePersistenceError> {
-    if !scene.objects().is_empty() {
+    if scene.objects().iter().any(Option::is_some) {
         return Err(ScenePersistenceError::SceneNotEmpty);
     }
     let Some(saved) = store.saved.as_ref() else {
@@ -305,6 +327,139 @@ mod tests {
 
     const TEST_WIDTH: u32 = 800;
     const TEST_HEIGHT: u32 = 600;
+
+    #[test]
+    fn snapshot_preserves_hidden_objects_and_individual_colors() {
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+        let root = scene.root_node();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let object = scene.create_object(mesh, root).unwrap();
+        let color = [0.2, 0.4, 0.8];
+        scene.set_object_color(object, color).unwrap();
+        scene.set_object_visible(object, false).unwrap();
+        let mut store = SceneStore::new();
+        save_scene(&mut store, &scene, &resources).unwrap();
+        let mut restored = SceneManager::new();
+        let mut restored_resources = ResourceManager::new();
+
+        restore_scene(&mut store, &mut restored, &mut restored_resources).unwrap();
+
+        let size = WindowSize::new(TEST_WIDTH, TEST_HEIGHT);
+        assert!(restored.build_render_frame(size).items.is_empty());
+        restored.set_object_visible(object, true).unwrap();
+        let frame = restored.build_render_frame(size);
+        assert_eq!(frame.items[0].color_override, Some(color));
+        assert_eq!(frame.items[0].mesh, mesh);
+        restored.reset_object_color(object).unwrap();
+        assert_eq!(
+            restored.build_render_frame(size).items[0].color_override,
+            None
+        );
+        assert_eq!(restored_resources.mesh(mesh), resources.mesh(mesh));
+    }
+
+    #[test]
+    fn invalid_saved_object_color_is_rejected_without_changes() {
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+        let root = scene.root_node();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        scene.create_object(mesh, root).unwrap();
+        let mut store = SceneStore::new();
+        save_scene(&mut store, &scene, &resources).unwrap();
+        store.saved.as_mut().unwrap().objects[0]
+            .as_mut()
+            .unwrap()
+            .color_override = Some([f32::NAN; 3]);
+        let mut restored = SceneManager::new();
+        let mut restored_resources = ResourceManager::new();
+
+        assert!(matches!(
+            restore_scene(&mut store, &mut restored, &mut restored_resources),
+            Err(ScenePersistenceError::Restore(_))
+        ));
+        assert!(restored.objects().is_empty());
+        assert!(restored_resources.meshes().is_empty());
+    }
+
+    #[test]
+    fn snapshot_preserves_removed_ids_and_shared_instances() {
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let root = scene.root_node();
+        let removed = scene.create_object(mesh, root).unwrap();
+        let survivor = scene.clone_object(removed, root).unwrap();
+        scene.remove_object(removed).unwrap();
+        let mut store = SceneStore::new();
+        save_scene(&mut store, &scene, &resources).unwrap();
+        let before = scene.build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT));
+        let mut restored = SceneManager::new();
+        let mut restored_resources = ResourceManager::new();
+
+        restore_scene(&mut store, &mut restored, &mut restored_resources).unwrap();
+
+        assert_eq!(
+            restored
+                .build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT))
+                .items,
+            before.items
+        );
+        assert!(restored.remove_object(removed).is_err());
+        let instance = restored.clone_object(survivor, root).unwrap();
+        assert_ne!(instance, removed);
+        assert_ne!(instance, survivor);
+        assert_eq!(restored_resources.meshes().len(), 1);
+    }
+
+    #[test]
+    fn restore_accepts_scene_after_all_objects_have_been_removed() {
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+        let mesh = resources.builtin(BuiltinMesh::Cube);
+        let root = scene.root_node();
+        let object = scene.create_object(mesh, root).unwrap();
+        let mut store = SceneStore::new();
+        save_scene(&mut store, &scene, &resources).unwrap();
+        scene.remove_object(object).unwrap();
+
+        restore_scene(&mut store, &mut scene, &mut resources).unwrap();
+
+        assert_eq!(
+            scene
+                .build_render_frame(WindowSize::new(TEST_WIDTH, TEST_HEIGHT))
+                .items
+                .len(),
+            1
+        );
+        scene.remove_object(object).unwrap();
+    }
+
+    #[test]
+    fn snapshot_with_reference_to_removed_object_is_rejected() {
+        let mut store = SceneStore {
+            saved: Some(SavedScene {
+                nodes: vec![SavedNode {
+                    objects: vec![SceneObjectId(0)],
+                    ..SavedNode::from_node(&SceneNode::default())
+                }],
+                objects: vec![None],
+                meshes: Vec::new(),
+                viewpoint: ViewpointState::default(),
+                lighting: SceneLighting::default(),
+            }),
+        };
+        let mut scene = SceneManager::new();
+        let mut resources = ResourceManager::new();
+
+        assert!(matches!(
+            restore_scene(&mut store, &mut scene, &mut resources),
+            Err(ScenePersistenceError::Restore(_))
+        ));
+        assert!(scene.objects().is_empty());
+        assert!(resources.meshes().is_empty());
+    }
 
     #[test]
     fn save_and_restore_round_trips_scene_and_render_frame() {

@@ -27,6 +27,13 @@ pub trait SceneApi {
     /// The identifier assigned to the new node.
     fn create_node(&mut self, parent: SceneNodeId) -> Result<SceneNodeId, SceneError>;
 
+    /// Returns a copy of the node's local translation, rotation and scale.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownNode`] if `node` does not exist.
+    fn node_transform(&self, node: SceneNodeId) -> Result<Transform, SceneError>;
+
     /// Sets the node's translation, rotation and scale relative to its parent.
     ///
     /// For the root node the transform is relative to the scene. Values are
@@ -41,6 +48,68 @@ pub trait SceneApi {
         node: SceneNodeId,
         transform: Transform,
     ) -> Result<(), SceneError>;
+
+    /// Creates an instance of `object` under `parent`, sharing its mesh.
+    ///
+    /// Visibility and the color override are copied independently. The new
+    /// object inherits the target node's transform. No geometry is
+    /// copied. The returned identifier is new and is not reused after removal.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] or [`SceneError::UnknownNode`] for
+    /// an unknown or removed source or an unknown parent, without changes.
+    fn clone_object(
+        &mut self,
+        object: SceneObjectId,
+        parent: SceneNodeId,
+    ) -> Result<SceneObjectId, SceneError>;
+
+    /// Removes `object` from the scene, leaving its node and shared mesh intact.
+    ///
+    /// The removed identifier becomes invalid. Other object identifiers and
+    /// instances of the mesh are unaffected. Mesh resources live until shutdown.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] for an unknown or removed object,
+    /// without changing the scene.
+    fn remove_object(&mut self, object: SceneObjectId) -> Result<(), SceneError>;
+
+    /// Sets whether this object is drawn, retaining its ID and mesh.
+    ///
+    /// Other objects and child nodes remain unaffected. New objects are visible.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] for an unknown or removed object.
+    fn set_object_visible(
+        &mut self,
+        object: SceneObjectId,
+        visible: bool,
+    ) -> Result<(), SceneError>;
+
+    /// Overrides this object's color with finite, nonnegative linear RGB.
+    ///
+    /// The mesh and other instances retain their colors. Lighting still applies;
+    /// this operation does not enable transparency.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] for an unknown or removed object,
+    /// or [`SceneError::InvalidObjectColor`] for invalid RGB, without changes.
+    fn set_object_color(
+        &mut self,
+        object: SceneObjectId,
+        color: [f32; 3],
+    ) -> Result<(), SceneError>;
+
+    /// Removes this object's color override, restoring the model's original color.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`SceneError::UnknownObject`] for an unknown or removed object.
+    fn reset_object_color(&mut self, object: SceneObjectId) -> Result<(), SceneError>;
 
     /// Reparents an object to another node.
     ///

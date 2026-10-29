@@ -6,6 +6,9 @@ use crate::scene::ids::{SceneNodeId, SceneObjectId};
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
 pub enum SceneError {
+    /// Object colors must contain finite, nonnegative linear RGB components.
+    #[error("object colors must contain finite, nonnegative components")]
+    InvalidObjectColor,
     /// Unknown scene node.
     #[error("unknown scene node: {0:?}")]
     UnknownNode(SceneNodeId),
