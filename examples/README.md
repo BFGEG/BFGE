@@ -12,6 +12,7 @@
 | [`city_flyover`](city_flyover.rs) | Облёт города из 144 зданий при изменении света. | `cargo run --release --locked --example city_flyover` |
 | [`spiral_sculpture`](spiral_sculpture.rs) | Облёт спирали из 96 цветных ступеней, которая вращается вокруг центра. | `cargo run --release --locked --example spiral_sculpture` |
 | [`depth_corridor`](depth_corridor.rs) | Полёт через 30 цветных арок и обратный пролёт. | `cargo run --release --locked --example depth_corridor` |
+| [`object_properties`](object_properties.rs) | Исходная модель и её экземпляр: независимый цвет, сброс цвета, скрытие и показ, чтение и изменение трансформации узла. | `cargo run --locked --example object_properties` |
 | [`runtime_objects`](runtime_objects.rs) | Создание и удаление экземпляров с общей геометрией, движение, вращение и масштабирование в заранее созданных узлах. | `cargo run --locked --example runtime_objects` |
 | [`runtime_model_loading`](runtime_model_loading.rs) | Последовательная загрузка трёх моделей во время `run()`, удаление предыдущей и анимация текущей. | `cargo run --locked --example runtime_model_loading` |
 

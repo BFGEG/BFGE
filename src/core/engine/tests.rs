@@ -1032,3 +1032,53 @@ fn native_engine_loads_model_and_drives_frames() -> Result<(), Box<dyn std::erro
     assert!(engine.platform.is_none());
     Ok(())
 }
+
+#[test]
+fn frame_started_color_override_reaches_the_current_frame() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    let object = engine.load_model(Path::new(TEST_MODEL), root).unwrap();
+    let color = [0.2, 0.4, 0.6];
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                context.scene().set_object_color(object, color)?;
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+
+    run_batches(&mut engine, [vec![], vec![PlatformEvent::CloseRequested]]).unwrap();
+
+    assert_eq!(
+        state.borrow().frames[0].items[0].color_override,
+        Some(color)
+    );
+}
+
+#[test]
+fn frame_ended_visibility_change_reaches_the_next_frame() {
+    let (mut engine, state) = initialized_engine();
+    let root = engine.scene().root_node();
+    let object = engine.load_model(Path::new(TEST_MODEL), root).unwrap();
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|_, _| Ok(())),
+            frame_ended: Box::new(move |context, _| {
+                context.scene().set_object_visible(object, false)?;
+                Ok(())
+            }),
+        })
+        .unwrap();
+
+    run_batches(
+        &mut engine,
+        [vec![], vec![], vec![PlatformEvent::CloseRequested]],
+    )
+    .unwrap();
+
+    let state = state.borrow();
+    assert_eq!(state.frames[0].items.len(), 1);
+    assert!(state.frames[1].items.is_empty());
+}

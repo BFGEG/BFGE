@@ -609,3 +609,132 @@ fn frame_collects_objects_from_every_level_of_the_tree() {
 
     assert_eq!(frame.items.len(), 3);
 }
+
+#[test]
+fn node_transform_returns_a_copy_of_the_local_transform() {
+    let mut scene = SceneManager::new();
+    let root = scene.root_node();
+    let child = scene.create_node(root).unwrap();
+    scene
+        .set_node_transform(root, Transform::from_translation(Vec3::X))
+        .unwrap();
+    let local = Transform::from_scale(Vec3::splat(2.0));
+    scene.set_node_transform(child, local).unwrap();
+
+    let mut copy = scene.node_transform(child).unwrap();
+    copy.translation = Vec3::Y;
+
+    assert_eq!(scene.node_transform(child).unwrap(), local);
+    assert_ne!(copy, local);
+    assert!(matches!(
+        scene.node_transform(SceneNodeId(99)),
+        Err(SceneError::UnknownNode(_))
+    ));
+}
+
+#[test]
+fn hidden_object_can_be_shown_without_hiding_siblings_or_children() {
+    let mut scene = SceneManager::new();
+    let mesh = MeshHandle::new(0);
+    let root = scene.root_node();
+    let child = scene.create_node(root).unwrap();
+    let object = scene.create_object(mesh, root).unwrap();
+    scene.create_object(mesh, root).unwrap();
+    scene.create_object(mesh, child).unwrap();
+    assert_eq!(scene.build_render_frame(WINDOW).items.len(), 3);
+
+    scene.set_object_visible(object, false).unwrap();
+    assert_eq!(scene.build_render_frame(WINDOW).items.len(), 2);
+    scene.set_object_visible(object, true).unwrap();
+    assert_eq!(scene.build_render_frame(WINDOW).items.len(), 3);
+}
+
+#[test]
+fn color_override_is_independent_of_shared_geometry_and_can_be_reset() {
+    let mut scene = SceneManager::new();
+    let mesh = MeshHandle::new(0);
+    let root = scene.root_node();
+    let source = scene.create_object(mesh, root).unwrap();
+    let instance = scene.clone_object(source, root).unwrap();
+    let color = [0.1, 0.3, 1.0];
+
+    scene.set_object_color(instance, color).unwrap();
+    let frame = scene.build_render_frame(WINDOW);
+    assert_eq!(frame.items[0].color_override, None);
+    assert_eq!(frame.items[1].color_override, Some(color));
+    assert_eq!(frame.items[0].mesh, frame.items[1].mesh);
+
+    scene.reset_object_color(instance).unwrap();
+    assert_eq!(
+        scene.build_render_frame(WINDOW).items[1].color_override,
+        None
+    );
+}
+
+#[test]
+fn invalid_object_colors_leave_the_previous_override_intact() {
+    let mut scene = SceneManager::new();
+    let root = scene.root_node();
+    let object = scene.create_object(MeshHandle::new(0), root).unwrap();
+    let valid = [0.2, 0.4, 0.6];
+    scene.set_object_color(object, valid).unwrap();
+
+    for invalid in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY, -0.1] {
+        for component in 0..3 {
+            let mut color = valid;
+            color[component] = invalid;
+            assert!(matches!(
+                scene.set_object_color(object, color),
+                Err(SceneError::InvalidObjectColor)
+            ));
+            assert_eq!(
+                scene.build_render_frame(WINDOW).items[0].color_override,
+                Some(valid)
+            );
+        }
+    }
+}
+
+#[test]
+fn property_setters_reject_unknown_and_removed_objects() {
+    let mut scene = SceneManager::new();
+    let root = scene.root_node();
+    let removed = scene.create_object(MeshHandle::new(0), root).unwrap();
+    scene.remove_object(removed).unwrap();
+
+    for object in [removed, SceneObjectId(99)] {
+        assert!(
+            matches!(scene.set_object_visible(object, false), Err(SceneError::UnknownObject(id)) if id == object)
+        );
+        assert!(
+            matches!(scene.set_object_color(object, [1.0; 3]), Err(SceneError::UnknownObject(id)) if id == object)
+        );
+        assert!(
+            matches!(scene.reset_object_color(object), Err(SceneError::UnknownObject(id)) if id == object)
+        );
+    }
+    assert!(scene.build_render_frame(WINDOW).items.is_empty());
+}
+
+#[test]
+fn clone_copies_properties_and_subsequent_changes_are_independent() {
+    let mut scene = SceneManager::new();
+    let root = scene.root_node();
+    let source = scene.create_object(MeshHandle::new(0), root).unwrap();
+    let color = [0.1, 0.8, 0.3];
+    scene.set_object_color(source, color).unwrap();
+    scene.set_object_visible(source, false).unwrap();
+
+    let instance = scene.clone_object(source, root).unwrap();
+    assert!(scene.build_render_frame(WINDOW).items.is_empty());
+    scene.set_object_visible(instance, true).unwrap();
+    assert_eq!(
+        scene.build_render_frame(WINDOW).items[0].color_override,
+        Some(color)
+    );
+    scene.reset_object_color(instance).unwrap();
+    scene.set_object_visible(source, true).unwrap();
+    let frame = scene.build_render_frame(WINDOW);
+    assert_eq!(frame.items[0].color_override, Some(color));
+    assert_eq!(frame.items[1].color_override, None);
+}

@@ -107,3 +107,29 @@ fn invalid_window_size_leaves_engine_uninitialized() {
     ));
     assert!(matches!(engine.run(), Err(EngineError::NotInitialized)));
 }
+
+#[test]
+fn public_api_preserves_object_properties_through_save_and_restore() {
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+    let node = engine.scene().create_node(root).unwrap();
+    let object = engine
+        .load_model(std::path::Path::new(TEST_MODEL), node)
+        .unwrap();
+    let mut transform = engine.scene().node_transform(node).unwrap();
+    transform.translation = Vec3::X;
+    engine.scene().set_node_transform(node, transform).unwrap();
+    engine
+        .scene()
+        .set_object_color(object, [0.2, 0.4, 0.6])
+        .unwrap();
+    engine.scene().set_object_visible(object, false).unwrap();
+    engine.save_scene().unwrap();
+    engine.scene().remove_object(object).unwrap();
+
+    engine.restore_scene().unwrap();
+
+    assert_eq!(engine.scene().node_transform(node).unwrap(), transform);
+    engine.scene().set_object_visible(object, true).unwrap();
+    engine.scene().reset_object_color(object).unwrap();
+}

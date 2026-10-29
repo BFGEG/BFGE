@@ -9,7 +9,7 @@ use crate::scene::error::SceneError;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::scene::lighting::SceneLighting;
 use crate::scene::node::SceneNode;
-use crate::scene::object::SceneObject;
+use crate::scene::object::{SceneObject, validate_color};
 use crate::scene::transform::Transform;
 use crate::scene::viewpoint::ViewpointState;
 
@@ -56,11 +56,18 @@ impl SceneManager {
         Ok(id)
     }
 
+    fn object_mut(&mut self, object: SceneObjectId) -> Result<&mut SceneObject, SceneError> {
+        self.objects
+            .get_mut(object.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or(SceneError::UnknownObject(object))
+    }
+
     /// Builds a frame from the current scene state.
     ///
     /// The camera comes from the viewpoint and the window size. The scene tree
     /// is traversed from the root, accumulating world transforms, and every
-    /// attached object becomes a [`RenderItem`].
+    /// visible attached object becomes a [`RenderItem`].
     #[allow(dead_code)]
     pub(crate) fn build_render_frame(&self, size: WindowSize) -> RenderFrame {
         let aspect_ratio = if size.height == 0 {
@@ -92,10 +99,13 @@ impl SceneManager {
         let world = parent_world * current.local_transform.matrix();
 
         for object in &current.objects {
-            if let Some(object) = self.objects.get(object.0 as usize).and_then(Option::as_ref) {
+            if let Some(object) = self.objects.get(object.0 as usize).and_then(Option::as_ref)
+                && object.visible
+            {
                 items.push(RenderItem {
                     world_transform: world,
                     mesh: object.mesh,
+                    color_override: object.color_override,
                 });
             }
         }
@@ -157,6 +167,13 @@ impl SceneApi for SceneManager {
         Ok(id)
     }
 
+    fn node_transform(&self, node: SceneNodeId) -> Result<Transform, SceneError> {
+        self.nodes
+            .get(node.0 as usize)
+            .map(|node| node.local_transform)
+            .ok_or(SceneError::UnknownNode(node))
+    }
+
     fn set_node_transform(
         &mut self,
         node: SceneNodeId,
@@ -180,7 +197,12 @@ impl SceneApi for SceneManager {
             .get(object.0 as usize)
             .and_then(Option::as_ref)
             .ok_or(SceneError::UnknownObject(object))?;
-        self.create_object(source.mesh, parent)
+        let (mesh, visible, color_override) = (source.mesh, source.visible, source.color_override);
+        let instance = self.create_object(mesh, parent)?;
+        let target = self.object_mut(instance)?;
+        target.visible = visible;
+        target.color_override = color_override;
+        Ok(instance)
     }
 
     fn remove_object(&mut self, object: SceneObjectId) -> Result<(), SceneError> {
@@ -193,6 +215,31 @@ impl SceneApi for SceneManager {
         for node in &mut self.nodes {
             node.objects.retain(|candidate| *candidate != object);
         }
+        Ok(())
+    }
+
+    fn set_object_visible(
+        &mut self,
+        object: SceneObjectId,
+        visible: bool,
+    ) -> Result<(), SceneError> {
+        self.object_mut(object)?.visible = visible;
+        Ok(())
+    }
+
+    fn set_object_color(
+        &mut self,
+        object: SceneObjectId,
+        color: [f32; 3],
+    ) -> Result<(), SceneError> {
+        let target = self.object_mut(object)?;
+        validate_color(color)?;
+        target.color_override = Some(color);
+        Ok(())
+    }
+
+    fn reset_object_color(&mut self, object: SceneObjectId) -> Result<(), SceneError> {
+        self.object_mut(object)?.color_override = None;
         Ok(())
     }
 

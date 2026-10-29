@@ -27,6 +27,8 @@ pub struct RenderCamera {
 /// One scene object prepared for drawing.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RenderItem {
+    /// Optional linear RGB override for this instance; otherwise use the mesh color.
+    pub color_override: Option<[f32; 3]>,
     /// Object transform in scene coordinates.
     pub world_transform: Mat4,
     /// Identifier of the object's geometry resource.
