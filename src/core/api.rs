@@ -47,11 +47,12 @@ pub trait EngineApi {
     ///
     /// `frame_started` is called before frame build;
     /// `frame_ended` is called after a successful render attempt. Handlers are
-    /// called in registration order and receive access to the scene and frame
-    /// times. A handler error stops the loop and is returned from `run`. Scene
-    /// changes made before an error are retained. Handlers remain registered
-    /// across sessions. Both phases are paused while the window has a zero
-    /// dimension.
+    /// called in registration order and receive a [`crate::FrameContext`] and
+    /// frame times. The context exposes scene operations and synchronous model
+    /// loading during `run`. A handler error stops the loop and is returned
+    /// from `run`. Scene changes made before an error are retained. Handlers
+    /// remain registered across sessions. Both phases are paused while the
+    /// window has a zero dimension.
     ///
     /// # Returns
     ///
@@ -85,6 +86,8 @@ pub trait EngineApi {
     /// on used geometry, or neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
     /// Textures and model-provided normals are ignored. Scene lighting is
     /// applied when the model is rendered. This operation requires no window.
+    /// During the blocking `run`, use [`crate::FrameContext::load_model`] from
+    /// a frame handler instead.
     ///
     /// # Errors
     ///

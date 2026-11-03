@@ -64,15 +64,18 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
 
     let mut angle = 0.0_f32;
     engine.add_event(EngineEvent {
-        frame_started: Box::new(move |scene, time| {
+        frame_started: Box::new(move |context, time| {
+            let scene = context.scene();
             angle = (angle + time.time_since_last_frame * TAU / LIGHT_CYCLE_SECONDS) % TAU;
-            scene.set_lighting(SceneLighting {
-                ambient: Vec3::splat(0.2),
-                directional: DirectionalLight {
-                    direction: Vec3::new(angle.cos(), -0.8, angle.sin()),
-                    color: Vec3::splat(0.9),
-                },
-            })
+            scene
+                .set_lighting(SceneLighting {
+                    ambient: Vec3::splat(0.2),
+                    directional: DirectionalLight {
+                        direction: Vec3::new(angle.cos(), -0.8, angle.sin()),
+                        color: Vec3::splat(0.9),
+                    },
+                })
+                .map_err(Into::into)
         }),
         frame_ended: Box::new(|_, _| Ok(())),
     })?;

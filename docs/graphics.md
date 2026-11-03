@@ -71,7 +71,8 @@
 cargo test --lib platform::tests::native_surface_initializes_resizes_presents_and_reinitializes -- --ignored --exact --nocapture
 ```
 
-Полный цикл движка с загрузкой модели и несколькими кадрами проверяется отдельно:
+Полный цикл движка с загрузкой модели, созданием экземпляра и удалением объектов
+из обработчиков кадров проверяется отдельно:
 
 ```bash
 cargo test --lib core::engine::tests::native_engine_loads_model_and_drives_frames -- --ignored --exact --nocapture

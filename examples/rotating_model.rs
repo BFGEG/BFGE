@@ -14,9 +14,12 @@ fn run_scene(engine: &mut Engine, path: &Path) -> Result<(), Box<dyn Error>> {
     engine.load_model(path, node)?;
     let mut angle = 0.0;
     engine.add_event(EngineEvent {
-        frame_started: Box::new(move |scene, time| {
+        frame_started: Box::new(move |context, time| {
+            let scene = context.scene();
             angle = (angle + time.time_since_last_frame) % TAU;
-            scene.set_node_transform(node, Transform::from_rotation(Quat::from_rotation_y(angle)))
+            scene
+                .set_node_transform(node, Transform::from_rotation(Quat::from_rotation_y(angle)))
+                .map_err(Into::into)
         }),
         frame_ended: Box::new(|_, _| Ok(())),
     })?;

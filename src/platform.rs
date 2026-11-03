@@ -499,6 +499,7 @@ mod tests {
                 items: items
                     .iter()
                     .map(|(offset, axis)| RenderItem {
+                        color_override: None,
                         world_transform: Mat4::from_translation(Vec3::new(*offset, 0.0, 0.0))
                             * Mat4::from_quat(Quat::from_axis_angle(*axis, angle)),
                         mesh: cube,

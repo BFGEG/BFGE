@@ -8,6 +8,7 @@ use winit::event_loop::EventLoop;
 use crate::core::api::EngineApi;
 use crate::core::engine_loop::{EngineEvent, EngineLoop, FrameClock, InternalEvent};
 use crate::core::error::EngineError;
+use crate::core::frame_context::FrameContext;
 use crate::platform::{
     PlatformAdapter, PlatformError, PlatformEvent, WindowDescriptor, WindowSize, new_event_loop,
     validate_window_size,
@@ -79,12 +80,14 @@ impl Engine {
     ) -> Result<(), EngineError> {
         clock.begin_frame(now());
         for event in self.event_loop.callbacks() {
-            (event.frame_started)(&mut self.parts.scene, &clock.event_time(now()))?;
+            let mut context = FrameContext::new(&mut self.parts.scene, &mut self.parts.resources);
+            (event.frame_started)(&mut context, &clock.event_time(now()))?;
         }
         let frame = self.parts.scene.build_render_frame(size);
         self.parts.renderer.render(&frame, &self.parts.resources)?;
         for event in self.event_loop.callbacks() {
-            (event.frame_ended)(&mut self.parts.scene, &clock.event_time(now()))?;
+            let mut context = FrameContext::new(&mut self.parts.scene, &mut self.parts.resources);
+            (event.frame_ended)(&mut context, &clock.event_time(now()))?;
         }
         Ok(())
     }

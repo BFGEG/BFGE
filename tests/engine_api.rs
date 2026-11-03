@@ -1,8 +1,32 @@
 use BFGE::math::Vec3;
 use BFGE::{
-    DirectionalLight, Engine, EngineApi, EngineError, SceneLighting, ViewpointState,
+    DirectionalLight, Engine, EngineApi, EngineError, SceneError, SceneLighting, ViewpointState,
     WindowDescriptor, WindowSize,
 };
+
+const TEST_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/cube.obj");
+
+#[test]
+fn public_scene_api_can_instance_and_remove_loaded_objects() {
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+    let object = engine
+        .load_model(std::path::Path::new(TEST_MODEL), root)
+        .unwrap();
+    let instance = engine.scene().clone_object(object, root).unwrap();
+
+    engine.scene().remove_object(object).unwrap();
+
+    assert!(
+        matches!(engine.scene().clone_object(object, root), Err(SceneError::UnknownObject(id)) if id == object)
+    );
+    assert!(
+        matches!(engine.scene().reparent_object(object, root), Err(SceneError::UnknownObject(id)) if id == object)
+    );
+    let next = engine.scene().clone_object(instance, root).unwrap();
+    assert_ne!(next, object);
+    assert_ne!(next, instance);
+}
 
 #[test]
 fn new_engine_exposes_default_viewpoint() {
@@ -82,4 +106,30 @@ fn invalid_window_size_leaves_engine_uninitialized() {
         Err(EngineError::Platform(_))
     ));
     assert!(matches!(engine.run(), Err(EngineError::NotInitialized)));
+}
+
+#[test]
+fn public_api_preserves_object_properties_through_save_and_restore() {
+    let mut engine = Engine::new();
+    let root = engine.scene().root_node();
+    let node = engine.scene().create_node(root).unwrap();
+    let object = engine
+        .load_model(std::path::Path::new(TEST_MODEL), node)
+        .unwrap();
+    let mut transform = engine.scene().node_transform(node).unwrap();
+    transform.translation = Vec3::X;
+    engine.scene().set_node_transform(node, transform).unwrap();
+    engine
+        .scene()
+        .set_object_color(object, [0.2, 0.4, 0.6])
+        .unwrap();
+    engine.scene().set_object_visible(object, false).unwrap();
+    engine.save_scene().unwrap();
+    engine.scene().remove_object(object).unwrap();
+
+    engine.restore_scene().unwrap();
+
+    assert_eq!(engine.scene().node_transform(node).unwrap(), transform);
+    engine.scene().set_object_visible(object, true).unwrap();
+    engine.scene().reset_object_color(object).unwrap();
 }

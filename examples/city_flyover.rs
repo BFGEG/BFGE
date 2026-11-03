@@ -99,17 +99,20 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
     build_city(engine)?;
     let mut elapsed = 0.0_f32;
     engine.add_event(EngineEvent {
-        frame_started: Box::new(move |scene, time| {
+        frame_started: Box::new(move |context, time| {
+            let scene = context.scene();
             elapsed = (elapsed + time.time_since_last_frame).rem_euclid(TOUR_SECONDS);
             scene.set_viewpoint(camera_at(elapsed))?;
             let angle = elapsed * TAU / TOUR_SECONDS;
-            scene.set_lighting(SceneLighting {
-                ambient: Vec3::splat(0.23),
-                directional: DirectionalLight {
-                    direction: Vec3::new(angle.cos(), -1.2, angle.sin()),
-                    color: Vec3::new(0.9, 0.78, 0.65),
-                },
-            })
+            scene
+                .set_lighting(SceneLighting {
+                    ambient: Vec3::splat(0.23),
+                    directional: DirectionalLight {
+                        direction: Vec3::new(angle.cos(), -1.2, angle.sin()),
+                        color: Vec3::new(0.9, 0.78, 0.65),
+                    },
+                })
+                .map_err(Into::into)
         }),
         frame_ended: Box::new(|_, _| Ok(())),
     })?;

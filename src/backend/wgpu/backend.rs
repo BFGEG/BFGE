@@ -120,7 +120,10 @@ impl RenderSystem for WgpuRenderSystem {
         let mut stats = RenderStats::default();
         for (index, item) in frame.items.iter().enumerate() {
             let mesh = buffers.get(device, resources, item.mesh)?;
-            pipeline.write_mesh(queue, index as u32, item.world_transform, mesh.color);
+            let color = item
+                .color_override
+                .map_or(mesh.color, |[r, g, b]| [r, g, b, 1.0]);
+            pipeline.write_mesh(queue, index as u32, item.world_transform, color);
             stats.triangles += mesh
                 .submeshes
                 .iter()
