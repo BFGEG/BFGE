@@ -5,7 +5,7 @@ use std::collections::hash_map::Entry;
 
 use bytemuck::{Pod, Zeroable};
 
-use crate::math::Vec3;
+use crate::math::{Vec3, Vec2};
 use crate::render::system::RenderError;
 use crate::resources::handle::MeshHandle;
 use crate::resources::manager::ResourceManager;
@@ -19,19 +19,21 @@ const INDEX_BUFFER_LABEL: &str = "BFGE mesh indices";
 pub(crate) struct GpuVertex {
     pub(crate) position: [f32; 3],
     pub(crate) normal: [f32; 3],
+    pub(crate) uv: [f32; 2],
 }
 
 impl GpuVertex {
     pub(crate) const LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
         array_stride: size_of::<GpuVertex>() as wgpu::BufferAddress,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3],
+        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x2],
     };
 
-    fn from_position_and_normal(position: Vec3, normal: Vec3) -> Self {
+    fn from_position_and_normal(position: Vec3, normal: Vec3, uv: Vec2) -> Self {
         Self {
             position: position.to_array(),
             normal: normal.to_array(),
+            uv: uv.to_array(),
         }
     }
 }
@@ -112,24 +114,24 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
                 .iter()
                 .zip(normals)
                 .map(|(vertex, normal)| {
-                    GpuVertex::from_position_and_normal(vertex.position, normal)
+                    GpuVertex::from_position_and_normal(vertex.position, normal, vertex.uv)
                 })
                 .collect::<Vec<_>>();
-            let vertices = create_buffer(
+            let vertex_buffer = create_buffer(
                 device,
                 VERTEX_BUFFER_LABEL,
                 bytemuck::cast_slice(&vertices),
                 wgpu::BufferUsages::VERTEX,
             );
-            let indices = create_buffer(
+            let index_buffer = create_buffer(
                 device,
                 INDEX_BUFFER_LABEL,
                 bytemuck::cast_slice(&submesh.indices),
                 wgpu::BufferUsages::INDEX,
             );
             GpuSubMesh {
-                vertices,
-                indices,
+                vertices : vertex_buffer,
+                indices :index_buffer,
                 index_count: submesh.indices.len() as u32,
             }
         })
