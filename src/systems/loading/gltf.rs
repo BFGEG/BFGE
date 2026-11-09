@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use super::{DEFAULT_MODEL_COLOR, LoadResult, parse_error, read_file};
 
-use crate::math::{Mat4, Vec3};
+use crate::math::{Mat4, Vec3, Vec2};
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 
 const DATA_URI_PREFIX: &str = "data:";
@@ -216,6 +216,7 @@ fn load_primitive(
         .ok_or_else(|| parse_error(path, "cannot read glTF positions"))?
         .map(|position| Vertex {
             position: transform.transform_point3(Vec3::from_array(position)),
+            uv: Vec2::ZERO
         })
         .collect::<Vec<_>>();
     let mut indices = if let Some(indices) = reader.read_indices() {

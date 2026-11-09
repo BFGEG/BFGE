@@ -12,7 +12,7 @@ use winit::error::EventLoopError;
 use winit::event_loop::EventLoop;
 
 use crate::backend::wgpu::backend::WgpuRenderSystem;
-use crate::math::{Quat, Vec3};
+use crate::math::{Quat, Vec2, Vec3};
 use crate::platform::{
     PlatformAdapter, PlatformError, PlatformEvent, WindowDescriptor, WindowSize,
 };
@@ -479,12 +479,15 @@ fn make_mesh(triangles: usize, mesh_index: usize) -> Mesh {
             [
                 Vertex {
                     position: Vec3::ZERO,
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(angle.cos() * 0.5, angle.sin() * 0.5, 0.0),
+                    uv: Vec2::ZERO,
                 },
                 Vertex {
                     position: Vec3::new(next.cos() * 0.5, next.sin() * 0.5, 0.0),
+                    uv: Vec2::ZERO,
                 },
             ]
         })

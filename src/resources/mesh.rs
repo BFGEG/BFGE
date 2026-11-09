@@ -1,12 +1,14 @@
 //! Geometry: vertices, mesh parts, and the mesh itself.
 
-use crate::math::Vec3;
+use crate::math::{Vec2, Vec3};
 
 /// A geometry vertex containing a position in model space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Vertex {
     /// Vertex position.
     pub position: Vec3,
+    /// UV Map position.
+    pub uv: Vec2,
 }
 
 /// Indexed triangle geometry forming one part of a mesh.

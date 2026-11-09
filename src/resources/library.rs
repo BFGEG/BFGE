@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::math::Vec3;
+use crate::math::{Vec3, Vec2};
 use crate::resources::handle::MeshHandle;
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 
@@ -95,7 +95,7 @@ impl MeshLibrary {
         for (face, corners) in CUBE_FACES.iter().enumerate() {
             let base = (face * 4) as u32;
             for corner in corners {
-                vertices.push(Vertex { position: *corner });
+                vertices.push(Vertex { position: *corner, uv: Vec2::ZERO });
             }
             indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
         }

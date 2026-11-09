@@ -5,7 +5,7 @@
 //! the scene's model transform. It depends on no other engine module: it
 //! accepts only primitive math types.
 
-pub use glam::{Mat4, Quat, Vec3};
+pub use glam::{Mat4, Quat, Vec3, Vec2};
 
 /// Near clipping plane distance (world units) used by [`perspective`].
 const NEAR: f32 = 0.1;

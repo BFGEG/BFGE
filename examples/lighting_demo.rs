@@ -11,6 +11,7 @@ use BFGE::{
 const WINDOW_TITLE: &str = "BFGE lighting demo";
 const CUBE_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/cube.obj");
 const BUNNY_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/stanford_bunny.obj");
+const UV_MAPPED_SIMPLE_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/Desk OBJ.obj");
 const LIGHT_CYCLE_SECONDS: f32 = 8.0;
 
 fn add_model(
@@ -40,11 +41,11 @@ fn add_model(
 fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
 
     add_model(
-        BUNNY_MODEL,
+        UV_MAPPED_SIMPLE_MODEL,
         engine,
         Vec3::new(-1.2, 0.0, 0.0),
         Quat::from_rotation_y(0.35),
-        Vec3::ONE,
+        0.005 * Vec3::ONE,
     )?;
     add_model(
         BUNNY_MODEL,

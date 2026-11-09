@@ -173,16 +173,22 @@ mod tests {
 
     #[test]
     fn degenerate_triangle_has_zero_normals() {
+        use crate::math::Vec2;
         use crate::resources::mesh::Vertex;
 
         let submesh = SubMesh {
             vertices: vec![
                 Vertex {
                     position: Vec3::ZERO,
+                    uv: Vec2::ZERO,
                 },
-                Vertex { position: Vec3::X },
+                Vertex {
+                    position: Vec3::X,
+                    uv: Vec2::ZERO,
+                },
                 Vertex {
                     position: Vec3::X * 2.0,
+                    uv: Vec2::ZERO,
                 },
             ],
             indices: vec![0, 1, 2],
