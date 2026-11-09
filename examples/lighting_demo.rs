@@ -10,17 +10,19 @@ use BFGE::{
 
 const WINDOW_TITLE: &str = "BFGE lighting demo";
 const CUBE_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/cube.obj");
+const BUNNY_MODEL: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/assets/stanford_bunny.obj");
 const LIGHT_CYCLE_SECONDS: f32 = 8.0;
 
-fn add_cube(
+fn add_model(
+    file: &str,
     engine: &mut Engine,
-    model: &Path,
     translation: Vec3,
     rotation: Quat,
     scale: Vec3,
 ) -> Result<(), Box<dyn Error>> {
     let root = engine.scene().root_node();
     let node = engine.scene().create_node(root)?;
+    let model = Path::new(file);
     engine.scene().set_node_transform(
         node,
         Transform {
@@ -33,25 +35,27 @@ fn add_cube(
     Ok(())
 }
 
+
+
 fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
-    let model = Path::new(CUBE_MODEL);
-    add_cube(
+
+    add_model(
+        BUNNY_MODEL,
         engine,
-        model,
         Vec3::new(-1.2, 0.0, 0.0),
         Quat::from_rotation_y(0.35),
         Vec3::ONE,
     )?;
-    add_cube(
+    add_model(
+        BUNNY_MODEL,
         engine,
-        model,
-        Vec3::new(1.2, 0.0, 0.0),
+        Vec3::new(1.2, -1.0, 0.0),
         Quat::from_rotation_y(-0.5),
-        Vec3::ONE,
+        10.0 * Vec3::ONE,
     )?;
-    add_cube(
+    add_model(
+        CUBE_MODEL,
         engine,
-        model,
         Vec3::new(0.0, -0.58, 0.0),
         Quat::IDENTITY,
         Vec3::new(4.2, 0.15, 2.4),
