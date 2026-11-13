@@ -1,6 +1,6 @@
 //! wgpu-backed graphics system.
 
-use super::buffer::BufferCache;
+use super::buffer::{MaterialCache, MeshCache};
 use super::pipeline::MeshPipeline;
 use super::surface::RenderSurface;
 use super::texture::DepthTarget;
@@ -30,7 +30,8 @@ const DEPTH_LOAD: wgpu::Operations<f32> = wgpu::Operations {
 pub struct WgpuRenderSystem {
     surface: Option<RenderSurface>,
     pipeline: Option<MeshPipeline>,
-    buffers: BufferCache,
+    meshes: MeshCache,
+    materials: MaterialCache,
     depth: DepthTarget,
     present_mode: Option<wgpu::PresentMode>,
 }
@@ -65,7 +66,8 @@ impl RenderSystem for WgpuRenderSystem {
                 self.present_mode,
             )?);
             self.pipeline = None;
-            self.buffers = BufferCache::default();
+            self.meshes = MeshCache::default();
+            self.materials = MaterialCache::default();
             self.depth = DepthTarget::default();
             Ok(())
         }
@@ -86,7 +88,8 @@ impl RenderSystem for WgpuRenderSystem {
         let Self {
             surface,
             pipeline,
-            buffers,
+            meshes,
+            materials: _,
             depth,
             present_mode: _,
         } = self;
@@ -119,7 +122,7 @@ impl RenderSystem for WgpuRenderSystem {
         );
         let mut stats = RenderStats::default();
         for (index, item) in frame.items.iter().enumerate() {
-            let mesh = buffers.get_mesh(device, resources, item.mesh)?;
+            let mesh = meshes.get_mesh(device, resources, item.mesh)?;
             let color = item
                 .color_override
                 .map_or(mesh.color, |[r, g, b]| [r, g, b, 1.0]);
@@ -154,7 +157,7 @@ impl RenderSystem for WgpuRenderSystem {
                 pass.set_pipeline(pipeline.pipeline());
                 pass.set_bind_group(0, pipeline.camera_bind_group(), &[]);
                 for (index, item) in frame.items.iter().enumerate() {
-                    let mesh = buffers.get_mesh(device,  resources, item.mesh)?;
+                    let mesh = meshes.get_mesh(device, resources, item.mesh)?;
                     let offset = index as u32 * pipeline.mesh_stride();
                     pass.set_bind_group(1, pipeline.mesh_bind_group(), &[offset]);
                     for submesh in &mesh.submeshes {

@@ -85,12 +85,16 @@ pub(crate) struct GpuSubMesh {
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct BufferCache {
+pub(crate) struct MeshCache {
     meshes: HashMap<MeshHandle, GpuMesh>,
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct MaterialCache {
     materials: HashMap<usize, GpuMaterial>,
 }
 
-impl BufferCache {
+impl MeshCache {
     pub(crate) fn get_mesh(
         &mut self,
         device: &wgpu::Device,
@@ -108,13 +112,20 @@ impl BufferCache {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.meshes.len()
+    }
+}
+
+impl MaterialCache {
     pub(crate) fn get_material(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         resources: &ResourceManager,
         handle: MeshHandle,
-        id: usize
+        id: usize,
     ) -> Result<&GpuMaterial, RenderError> {
         match self.materials.entry(id) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
@@ -122,7 +133,7 @@ impl BufferCache {
                 let mesh = resources.mesh(handle).ok_or_else(|| {
                     RenderError::Render(format!("unknown mesh handle {handle:?}"))
                 })?;
-                let material =  mesh.materials.get(id).ok_or_else(|| {
+                let material = mesh.materials.get(id).ok_or_else(|| {
                     RenderError::Render(format!("unknown material handle {id:?}"))
                 })?;
                 Ok(entry.insert(upload_material(device, queue, material)))
@@ -131,12 +142,7 @@ impl BufferCache {
     }
 
     #[cfg(test)]
-    pub(crate) fn mesh_len(&self) -> usize {
-        self.meshes.len()
-    }
-
-    #[cfg(test)]
-    pub(crate) fn mat_len(&self) -> usize {
+    pub(crate) fn len(&self) -> usize {
         self.materials.len()
     }
 }
@@ -351,6 +357,6 @@ mod tests {
 
     #[test]
     fn cache_len_starts_empty() {
-        assert_eq!(BufferCache::default().mesh_len(), 0);
+        assert_eq!(MeshCache::default().len(), 0);
     }
 }
