@@ -1,6 +1,7 @@
 //! Geometry: vertices, mesh parts, and the mesh itself.
 
 use crate::math::{Vec2, Vec3};
+use std::path::PathBuf;
 
 /// A geometry vertex containing a position in model space.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -18,16 +19,23 @@ pub struct SubMesh {
     pub vertices: Vec<Vertex>,
     /// Indices into `vertices`, grouped in triples to form triangles.
     pub indices: Vec<u32>,
+    /// Material identificator.
+    pub material: usize,
 }
 
 /// A wrapper for tobj::material
 #[derive(Debug, Clone)]
-pub struct TobjMaterial(pub tobj::Material);
+pub struct TobjMaterial {
+    pub material: tobj::Material,
+    pub path: PathBuf,
+}
+
 impl PartialEq for TobjMaterial {
     fn eq(&self, other: &Self) -> bool {
-        let a = &self.0;
-        let b = &other.0;
-        return a.name == b.name
+        let a = &self.material;
+        let b = &other.material;
+        return self.path == other.path
+            && a.name == b.name
             && a.ambient == b.ambient
             && a.diffuse == b.diffuse
             && a.specular == b.specular

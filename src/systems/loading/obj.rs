@@ -39,6 +39,7 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
     let mut parts = Vec::new();
     for model in models {
         let mesh = model.mesh;
+        let material_id = mesh.material_id.unwrap_or(0);
         if mesh.indices.is_empty() {
             continue;
         }
@@ -109,9 +110,9 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
         }
 
         let indices = triangulate(path, indices, &mesh.face_arities, &vertices)?;
-        parts.push(SubMesh { vertices, indices });
+        parts.push(SubMesh { vertices, indices, material : material_id });
     }
-    let materials = materials.into_iter().map(|m| Material::ObjMaterial(TobjMaterial(m))).collect();
+    let materials = materials.into_iter().map(|m| Material::ObjMaterial(TobjMaterial{material : m, path : path.to_path_buf()})).collect();
     Ok(Mesh {
         submeshes: parts,
         color: color.unwrap_or(DEFAULT_MODEL_COLOR),

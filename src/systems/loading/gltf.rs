@@ -232,7 +232,7 @@ fn load_primitive(
             triangle.swap(1, 2);
         }
     }
-    Ok(SubMesh { vertices, indices })
+    Ok(SubMesh { vertices, indices, material: 0 })
 }
 
 fn validate_accessor(
