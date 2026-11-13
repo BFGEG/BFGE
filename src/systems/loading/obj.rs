@@ -5,7 +5,7 @@ use std::path::Path;
 use super::{DEFAULT_MODEL_COLOR, LoadResult, parse_error, read_file};
 
 use crate::math::{Vec3, Vec2};
-use crate::resources::mesh::{Mesh, SubMesh, Vertex};
+use crate::resources::mesh::{Mesh, SubMesh, Vertex, Material, TobjMaterial};
 
 const POLYGON_TOLERANCE: f32 = 1e-5;
 
@@ -111,9 +111,11 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
         let indices = triangulate(path, indices, &mesh.face_arities, &vertices)?;
         parts.push(SubMesh { vertices, indices });
     }
+    let materials = materials.into_iter().map(|m| Material::ObjMaterial(TobjMaterial(m))).collect();
     Ok(Mesh {
         submeshes: parts,
         color: color.unwrap_or(DEFAULT_MODEL_COLOR),
+        materials,
     })
 }
 

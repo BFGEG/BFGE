@@ -20,6 +20,39 @@ pub struct SubMesh {
     pub indices: Vec<u32>,
 }
 
+/// A wrapper for tobj::material
+#[derive(Debug, Clone)]
+pub struct TobjMaterial(pub tobj::Material);
+impl PartialEq for TobjMaterial {
+    fn eq(&self, other: &Self) -> bool {
+        let a = &self.0;
+        let b = &other.0;
+        return a.name == b.name
+            && a.ambient == b.ambient
+            && a.diffuse == b.diffuse
+            && a.specular == b.specular
+            && a.emissive == b.emissive
+            && a.shininess == b.shininess
+            && a.dissolve == b.dissolve
+            && a.optical_density == b.optical_density
+            && a.ambient_texture == b.ambient_texture
+            && a.diffuse_texture == b.diffuse_texture
+            && a.specular_texture == b.specular_texture
+            && a.normal_texture == b.normal_texture
+            && a.shininess_texture == b.shininess_texture
+            && a.dissolve_texture == b.dissolve_texture
+            && a.illumination_model == b.illumination_model
+            && a.unknown_param == b.unknown_param;
+    }
+}
+
+/// Enum of materials.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Material {
+    /// The .mtl material for .obj
+    ObjMaterial(TobjMaterial),
+}
+
 /// Geometry resource and the single linear RGBA color used for all its parts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Mesh {
@@ -27,4 +60,6 @@ pub struct Mesh {
     pub submeshes: Vec<SubMesh>,
     /// Common color of the model, linear RGBA.
     pub color: [f32; 4],
+    /// Material enum.
+    pub materials: Vec<Material>,
 }

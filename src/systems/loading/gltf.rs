@@ -113,6 +113,7 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
     Ok(Mesh {
         submeshes: parts,
         color: color.unwrap_or(DEFAULT_MODEL_COLOR),
+                    materials: Vec::new(),
     })
 }
 
@@ -176,6 +177,7 @@ fn load_primitive(
     blob: Option<&[u8]>,
     transform: Mat4,
 ) -> LoadResult<SubMesh> {
+    
     if primitive.mode() != Mode::Triangles || primitive.morph_targets().next().is_some() {
         return Err(parse_error(
             path,

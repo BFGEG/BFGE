@@ -103,6 +103,7 @@ impl MeshLibrary {
         Mesh {
             submeshes: vec![SubMesh { vertices, indices }],
             color: CUBE_COLOR,
+            materials: Vec::new(),
         }
     }
 }
