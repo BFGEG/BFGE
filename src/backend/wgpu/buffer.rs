@@ -67,8 +67,6 @@ fn vertex_normals(submesh: &SubMesh) -> Vec<Vec3> {
 
 #[derive(Debug)]
 pub(crate) struct GpuMaterial {
-    pub(crate) name: String,
-    pub(crate) diffuse_texture: wgpu::Texture,
     pub(crate) bind_group: wgpu::BindGroup,
 }
 
@@ -176,11 +174,7 @@ fn upload_material(
         }
     };
     let bind_group = create_texture_bind_group(device, layout, &texture, &name);
-    GpuMaterial {
-        name,
-        diffuse_texture: texture,
-        bind_group,
-    }
+    GpuMaterial { bind_group }
 }
 
 fn upload_fallback_material(
@@ -190,11 +184,7 @@ fn upload_fallback_material(
 ) -> GpuMaterial {
     let texture = white_texture(device, queue);
     let bind_group = create_texture_bind_group(device, layout, &texture, FALLBACK_MATERIAL_LABEL);
-    GpuMaterial {
-        name: FALLBACK_MATERIAL_LABEL.to_owned(),
-        diffuse_texture: texture,
-        bind_group,
-    }
+    GpuMaterial { bind_group }
 }
 
 fn white_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
@@ -377,11 +367,13 @@ mod tests {
     #[test]
     fn vertex_layout_offsets_match_the_struct() {
         let attributes = GpuVertex::LAYOUT.attributes;
-        assert_eq!(GpuVertex::LAYOUT.array_stride, 24);
+        assert_eq!(GpuVertex::LAYOUT.array_stride, 32);
         assert_eq!(attributes[0].offset, 0);
         assert_eq!(attributes[1].offset, 12);
+        assert_eq!(attributes[2].offset, 24);
         assert_eq!(attributes[0].shader_location, 0);
         assert_eq!(attributes[1].shader_location, 1);
+        assert_eq!(attributes[2].shader_location, 2);
     }
 
     #[test]
