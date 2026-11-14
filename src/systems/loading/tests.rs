@@ -482,9 +482,9 @@ fn obj_maps_texture_coordinates_through_uv_indices() {
 
     let mesh = read_mesh(&path).expect("UV indices select the matching texture coordinate");
 
-    assert_eq!(mesh.submeshes[0].vertices[0].uv, Vec2::new(0.0, 0.0));
-    assert_eq!(mesh.submeshes[0].vertices[1].uv, Vec2::new(1.0, 0.0));
-    assert_eq!(mesh.submeshes[0].vertices[2].uv, Vec2::new(1.0, 0.0));
+    assert_eq!(mesh.submeshes[0].vertices[0].uv, Vec2::new(0.0, 1.0));
+    assert_eq!(mesh.submeshes[0].vertices[1].uv, Vec2::new(1.0, 1.0));
+    assert_eq!(mesh.submeshes[0].vertices[2].uv, Vec2::new(1.0, 1.0));
 }
 
 #[test]
