@@ -3,14 +3,14 @@
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
-use image::GenericImageView; 
 use bytemuck::{Pod, Zeroable};
+use image::GenericImageView;
 
-use crate::math::{Vec3, Vec2};
+use crate::math::{Vec2, Vec3};
 use crate::render::system::RenderError;
-use crate::resources::handle::{MeshHandle};
+use crate::resources::handle::MeshHandle;
 use crate::resources::manager::ResourceManager;
-use crate::resources::mesh::{Mesh, SubMesh, Material};
+use crate::resources::mesh::{Material, Mesh, SubMesh};
 
 const VERTEX_BUFFER_LABEL: &str = "BFGE mesh vertices";
 const INDEX_BUFFER_LABEL: &str = "BFGE mesh indices";
@@ -24,7 +24,6 @@ pub(crate) struct GpuVertex {
     pub(crate) normal: [f32; 3],
     pub(crate) uv: [f32; 2],
 }
-
 
 impl GpuVertex {
     pub(crate) const LAYOUT: wgpu::VertexBufferLayout<'static> = wgpu::VertexBufferLayout {
@@ -291,8 +290,8 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
                 wgpu::BufferUsages::INDEX,
             );
             GpuSubMesh {
-                vertices : vertex_buffer,
-                indices :index_buffer,
+                vertices: vertex_buffer,
+                indices: index_buffer,
                 index_count: submesh.indices.len() as u32,
                 material: submesh.material,
             }
@@ -303,8 +302,6 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
         color: mesh.color,
     }
 }
-
-
 
 fn create_buffer(
     device: &wgpu::Device,

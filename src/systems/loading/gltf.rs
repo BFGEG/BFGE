@@ -9,7 +9,7 @@ use serde::Deserialize;
 
 use super::{DEFAULT_MODEL_COLOR, LoadResult, parse_error, read_file};
 
-use crate::math::{Mat4, Vec3, Vec2};
+use crate::math::{Mat4, Vec2, Vec3};
 use crate::resources::mesh::{Mesh, SubMesh, Vertex};
 
 const DATA_URI_PREFIX: &str = "data:";
@@ -113,7 +113,7 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
     Ok(Mesh {
         submeshes: parts,
         color: color.unwrap_or(DEFAULT_MODEL_COLOR),
-                    materials: Vec::new(),
+        materials: Vec::new(),
     })
 }
 
@@ -177,7 +177,6 @@ fn load_primitive(
     blob: Option<&[u8]>,
     transform: Mat4,
 ) -> LoadResult<SubMesh> {
-    
     if primitive.mode() != Mode::Triangles || primitive.morph_targets().next().is_some() {
         return Err(parse_error(
             path,
@@ -218,7 +217,7 @@ fn load_primitive(
         .ok_or_else(|| parse_error(path, "cannot read glTF positions"))?
         .map(|position| Vertex {
             position: transform.transform_point3(Vec3::from_array(position)),
-            uv: Vec2::ZERO
+            uv: Vec2::ZERO,
         })
         .collect::<Vec<_>>();
     let mut indices = if let Some(indices) = reader.read_indices() {
@@ -232,7 +231,11 @@ fn load_primitive(
             triangle.swap(1, 2);
         }
     }
-    Ok(SubMesh { vertices, indices, material: 0 })
+    Ok(SubMesh {
+        vertices,
+        indices,
+        material: 0,
+    })
 }
 
 fn validate_accessor(
