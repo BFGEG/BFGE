@@ -23,10 +23,12 @@ pub struct SubMesh {
     pub material: usize,
 }
 
-/// A wrapper for tobj::material
+/// A wrapper for tobj::material.
 #[derive(Debug, Clone)]
 pub struct TobjMaterial {
+    /// Material from tobj library.
     pub material: tobj::Material,
+    /// Path to .obj file.
     pub path: PathBuf,
 }
 
@@ -34,7 +36,7 @@ impl PartialEq for TobjMaterial {
     fn eq(&self, other: &Self) -> bool {
         let a = &self.material;
         let b = &other.material;
-        return self.path == other.path
+        self.path == other.path
             && a.name == b.name
             && a.ambient == b.ambient
             && a.diffuse == b.diffuse
@@ -50,7 +52,7 @@ impl PartialEq for TobjMaterial {
             && a.shininess_texture == b.shininess_texture
             && a.dissolve_texture == b.dissolve_texture
             && a.illumination_model == b.illumination_model
-            && a.unknown_param == b.unknown_param;
+            && a.unknown_param == b.unknown_param
     }
 }
 
