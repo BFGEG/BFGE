@@ -141,11 +141,6 @@ impl MaterialCache {
             }
         }
     }
-
-    #[cfg(test)]
-    pub(crate) fn len(&self) -> usize {
-        self.materials.len()
-    }
 }
 
 fn upload_material(
