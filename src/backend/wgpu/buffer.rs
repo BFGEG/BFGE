@@ -14,6 +14,8 @@ use crate::resources::mesh::{Mesh, SubMesh, Material};
 
 const VERTEX_BUFFER_LABEL: &str = "BFGE mesh vertices";
 const INDEX_BUFFER_LABEL: &str = "BFGE mesh indices";
+const FALLBACK_MATERIAL_LABEL: &str = "BFGE fallback material";
+const WHITE_PIXEL: [u8; 4] = [255, 255, 255, 255];
 
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Pod, Zeroable)]
@@ -91,7 +93,7 @@ pub(crate) struct MeshCache {
 
 #[derive(Debug, Default)]
 pub(crate) struct MaterialCache {
-    materials: HashMap<usize, GpuMaterial>,
+    materials: HashMap<(MeshHandle, usize), GpuMaterial>,
 }
 
 impl MeshCache {
@@ -124,19 +126,21 @@ impl MaterialCache {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         resources: &ResourceManager,
+        layout: &wgpu::BindGroupLayout,
         handle: MeshHandle,
         id: usize,
     ) -> Result<&GpuMaterial, RenderError> {
-        match self.materials.entry(id) {
+        match self.materials.entry((handle, id)) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
                 let mesh = resources.mesh(handle).ok_or_else(|| {
                     RenderError::Render(format!("unknown mesh handle {handle:?}"))
                 })?;
-                let material = mesh.materials.get(id).ok_or_else(|| {
-                    RenderError::Render(format!("unknown material handle {id:?}"))
-                })?;
-                Ok(entry.insert(upload_material(device, queue, material)))
+                let material = match mesh.materials.get(id) {
+                    Some(material) => upload_material(device, queue, material, layout),
+                    None => upload_fallback_material(device, queue, layout),
+                };
+                Ok(entry.insert(material))
             }
         }
     }
@@ -147,102 +151,127 @@ impl MaterialCache {
     }
 }
 
-fn upload_material(device: &wgpu::Device, queue: &wgpu::Queue, material: &Material) -> GpuMaterial {
-    let texture_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("texture_bind_group_layout"),
-        entries: &[
+fn upload_material(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    material: &Material,
+    layout: &wgpu::BindGroupLayout,
+) -> GpuMaterial {
+    let (name, texture) = match material {
+        Material::ObjMaterial(tobj) => {
+            let name = tobj.material.name.clone();
+            let texture = tobj
+                .material
+                .diffuse_texture
+                .as_deref()
+                .and_then(|file| tobj.path.parent().map(|dir| dir.join(file)))
+                .and_then(|path| image::open(path).ok())
+                .map(|image| {
+                    let rgba = image.to_rgba8();
+                    let (width, height) = image.dimensions();
+                    create_diffuse_texture(device, queue, width, height, &rgba, &name)
+                })
+                .unwrap_or_else(|| white_texture(device, queue));
+            (name, texture)
+        }
+    };
+    let bind_group = create_texture_bind_group(device, layout, &texture, &name);
+    GpuMaterial {
+        name,
+        diffuse_texture: texture,
+        bind_group,
+    }
+}
 
-            wgpu::BindGroupLayoutEntry {
+fn upload_fallback_material(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+) -> GpuMaterial {
+    let texture = white_texture(device, queue);
+    let bind_group = create_texture_bind_group(device, layout, &texture, FALLBACK_MATERIAL_LABEL);
+    GpuMaterial {
+        name: FALLBACK_MATERIAL_LABEL.to_owned(),
+        diffuse_texture: texture,
+        bind_group,
+    }
+}
+
+fn white_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
+    create_diffuse_texture(device, queue, 1, 1, &WHITE_PIXEL, FALLBACK_MATERIAL_LABEL)
+}
+
+fn create_diffuse_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    label: &str,
+) -> wgpu::Texture {
+    let size = wgpu::Extent3d {
+        width,
+        height,
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some(label),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture: &texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(4 * width),
+            rows_per_image: Some(height),
+        },
+        size,
+    );
+    texture
+}
+
+fn create_texture_bind_group(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    texture: &wgpu::Texture,
+    label: &str,
+) -> wgpu::BindGroup {
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        address_mode_u: wgpu::AddressMode::Repeat,
+        address_mode_v: wgpu::AddressMode::Repeat,
+        address_mode_w: wgpu::AddressMode::Repeat,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
+        mipmap_filter: wgpu::MipmapFilterMode::Nearest,
+        ..Default::default()
+    });
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some(label),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    multisampled: false,
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                },
-                count: None,
+                resource: wgpu::BindingResource::TextureView(&view),
             },
-                  wgpu::BindGroupLayoutEntry {
+            wgpu::BindGroupEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
+                resource: wgpu::BindingResource::Sampler(&sampler),
             },
         ],
-    });
-    match material {
-        Material::ObjMaterial(tobj) => {
-            let path: String = tobj.path.to_string_lossy().into_owned();
-            let img = image::open(path).expect("Failed to load diffuse image");
-            let rgba = img.to_rgba8();
-            let (width, height) = img.dimensions();
-
-            let size = wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            };
-
-            let diffuse_texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(&tobj.material.name),
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-
-            queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &diffuse_texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &rgba,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(4 * width),
-                    rows_per_image: Some(height),
-                },
-                size,
-            );
-
-            let view = diffuse_texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::Repeat,
-                address_mode_v: wgpu::AddressMode::Repeat,
-                address_mode_w: wgpu::AddressMode::Repeat,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::MipmapFilterMode::Nearest,
-                ..Default::default()
-            });
-
-            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                layout: &texture_bind_group_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&sampler),
-                    },
-                ],
-                label: Some(&format!("{}_bind_group", tobj.material.name)),
-            });
-        GpuMaterial {
-            name : tobj.material.name.to_string(),
-            diffuse_texture,
-            bind_group
-        }
-        }
-    }
+    })
 }
 
 fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {

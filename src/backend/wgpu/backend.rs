@@ -89,7 +89,7 @@ impl RenderSystem for WgpuRenderSystem {
             surface,
             pipeline,
             meshes,
-            materials: _,
+            materials,
             depth,
             present_mode: _,
         } = self;
@@ -161,6 +161,15 @@ impl RenderSystem for WgpuRenderSystem {
                     let offset = index as u32 * pipeline.mesh_stride();
                     pass.set_bind_group(1, pipeline.mesh_bind_group(), &[offset]);
                     for submesh in &mesh.submeshes {
+                        let material = materials.get_material(
+                            device,
+                            queue,
+                            resources,
+                            pipeline.material_layout(),
+                            item.mesh,
+                            submesh.material,
+                        )?;
+                        pass.set_bind_group(2, &material.bind_group, &[]);
                         pass.set_vertex_buffer(0, submesh.vertices.slice(..));
                         pass.set_index_buffer(submesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                         pass.draw_indexed(0..submesh.index_count, 0, 0..1);

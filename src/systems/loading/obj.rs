@@ -101,7 +101,7 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
                         ),
                         uv: texcoord_index
                             .and_then(|index| texcoords.get(index))
-                            .map(|uv| Vec2::new(uv[0], uv[1]))
+                            .map(|uv| Vec2::new(uv[0], 1.0 - uv[1]))
                             .unwrap_or(Vec2::ZERO),
                     });
                     vertex_index

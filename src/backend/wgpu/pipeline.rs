@@ -14,6 +14,7 @@ const MESH_SHADER: wgpu::ShaderModuleDescriptor<'_> = wgpu::include_wgsl!("shade
 const PIPELINE_LABEL: &str = "BFGE mesh pipeline";
 const CAMERA_LAYOUT_LABEL: &str = "BFGE camera bind group layout";
 const MESH_LAYOUT_LABEL: &str = "BFGE mesh bind group layout";
+const MATERIAL_LAYOUT_LABEL: &str = "BFGE material bind group layout";
 const CAMERA_BUFFER_LABEL: &str = "BFGE camera uniform";
 const MESH_BUFFER_LABEL: &str = "BFGE mesh uniforms";
 const MESH_BUFFER_INITIAL_CAPACITY: u32 = 1;
@@ -45,6 +46,7 @@ pub(crate) struct MeshPipeline {
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     mesh_layout: wgpu::BindGroupLayout,
+    material_layout: wgpu::BindGroupLayout,
     mesh_buffer: wgpu::Buffer,
     mesh_bind_group: wgpu::BindGroup,
     mesh_stride: u32,
@@ -56,7 +58,15 @@ impl MeshPipeline {
         let shader = device.create_shader_module(MESH_SHADER);
         let camera_layout = camera_bind_group_layout(device);
         let mesh_layout = mesh_bind_group_layout(device);
-        let pipeline = create_pipeline(device, &shader, format, &camera_layout, &mesh_layout);
+        let material_layout = material_bind_group_layout(device);
+        let pipeline = create_pipeline(
+            device,
+            &shader,
+            format,
+            &camera_layout,
+            &mesh_layout,
+            &material_layout,
+        );
 
         let camera_buffer = uniform_buffer(device, CAMERA_BUFFER_LABEL, size_of::<CameraUniform>());
         let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -80,6 +90,7 @@ impl MeshPipeline {
             camera_buffer,
             camera_bind_group,
             mesh_layout,
+            material_layout,
             mesh_buffer,
             mesh_bind_group,
             mesh_stride,
@@ -97,6 +108,10 @@ impl MeshPipeline {
 
     pub(crate) fn mesh_bind_group(&self) -> &wgpu::BindGroup {
         &self.mesh_bind_group
+    }
+
+    pub(crate) fn material_layout(&self) -> &wgpu::BindGroupLayout {
+        &self.material_layout
     }
 
     pub(crate) fn pipeline(&self) -> &wgpu::RenderPipeline {
@@ -170,6 +185,30 @@ fn mesh_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
+fn material_bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some(MATERIAL_LAYOUT_LABEL),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    multisampled: false,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
 fn create_mesh_bind_group(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
@@ -208,10 +247,15 @@ fn create_pipeline(
     format: wgpu::TextureFormat,
     camera_layout: &wgpu::BindGroupLayout,
     mesh_layout: &wgpu::BindGroupLayout,
+    material_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(PIPELINE_LABEL),
-        bind_group_layouts: &[Some(camera_layout), Some(mesh_layout)],
+        bind_group_layouts: &[
+            Some(camera_layout),
+            Some(mesh_layout),
+            Some(material_layout),
+        ],
         immediate_size: 0,
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
