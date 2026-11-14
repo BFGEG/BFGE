@@ -494,8 +494,13 @@ fn make_mesh(triangles: usize, mesh_index: usize) -> Mesh {
         .collect::<Vec<_>>();
     let indices = (0..vertices.len() as u32).collect();
     Mesh {
-        submeshes: vec![SubMesh { vertices, indices }],
+        submeshes: vec![SubMesh {
+            vertices,
+            indices,
+            material: 0,
+        }],
         color: [0.5 + (mesh_index % 5) as f32 * 0.1, 0.7, 0.8, 1.0],
+        materials: Vec::new(),
     }
 }
 
