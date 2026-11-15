@@ -114,6 +114,47 @@ Euler-представление, указываются в радианах. П
 разделяемого состояния. Пример анимации объекта находится в
 [`rotating_model`](../examples/rotating_model.rs).
 
+## Ввод
+
+Состояние ввода собирается из событий окна до вызова обработчиков кадра и
+доступно через `context.input()`:
+
+- `is_key_pressed(KeyCode)` и `is_mouse_pressed(MouseButton)` — удерживается ли
+  клавиша или кнопка мыши;
+- `cursor_position()` — положение курсора в физических пикселях;
+- `mouse_delta()` — смещение мыши, накопленное с предыдущего кадра.
+
+Нажатие снимается событием отпускания; при потере фокуса окна все нажатия
+очищаются. Смещение мыши сбрасывается после обработчиков конца кадра, поэтому
+читать его следует в начале кадра. Состояние ввода обновляется в активной
+сессии; до `initialize` и после `shutdown` обработчики не вызываются.
+
+```rust
+use BFGE::{Engine, EngineApi, EngineEvent, KeyCode, Transform};
+use BFGE::math::Vec3;
+
+let mut engine = Engine::new();
+let root = engine.scene().root_node();
+let node = engine.scene().create_node(root)?;
+let mut offset = 0.0_f32;
+engine.add_event(EngineEvent {
+    frame_started: Box::new(move |context, time| {
+        if context.input().is_key_pressed(KeyCode::KeyW) {
+            offset += time.time_since_last_frame;
+        }
+        context.scene().set_node_transform(
+            node,
+            Transform::from_translation(Vec3::new(0.0, 0.0, offset)),
+        )?;
+        Ok(())
+    }),
+    frame_ended: Box::new(|_, _| Ok(())),
+})?;
+```
+
+Типы `KeyCode` и `MouseButton` экспортируются движком, отдельная зависимость от
+`winit` в клиентском приложении не нужна.
+
 ## Изменение объектов во время работы
 
 Сцена сохраняет устройство «дерево узлов и привязанные к ним объекты».
