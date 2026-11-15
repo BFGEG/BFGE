@@ -131,15 +131,15 @@ pub trait SceneApi {
     ///
     /// # Returns
     ///
-    /// A copy of the viewpoint state.
+    /// A copy of the viewpoint state, including its roll.
     fn viewpoint(&self) -> ViewpointState;
 
-    /// Sets the viewpoint's position, view direction and field of view.
+    /// Sets the viewpoint's position, view direction, roll and field of view.
     ///
     /// Values are stored as provided; this operation does not validate them.
     /// Use a finite position, a finite nonzero direction not parallel to the
-    /// world up axis, and a field of view between zero and π radians to form a
-    /// meaningful view and projection.
+    /// world up axis, a finite roll, and a field of view between zero and π
+    /// radians to form a meaningful view and projection.
     ///
     /// # Errors
     ///

@@ -81,7 +81,11 @@ impl SceneManager {
 
         RenderFrame {
             camera: RenderCamera {
-                view: math::view(self.viewpoint.position, self.viewpoint.direction),
+                view: math::view(
+                    self.viewpoint.position,
+                    self.viewpoint.direction,
+                    self.viewpoint.roll,
+                ),
                 projection: math::perspective(self.viewpoint.fov_y, aspect_ratio),
             },
             lighting: self.lighting,

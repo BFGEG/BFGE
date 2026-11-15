@@ -455,7 +455,7 @@ mod tests {
         let mut resources = ResourceManager::new();
         let cube = resources.builtin(BuiltinMesh::Cube);
 
-        let view = math::view(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+        let view = math::view(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0), 0.0);
         let items = [(-1.5_f32, Vec3::Y), (1.5, Vec3::X)];
 
         backend.initialize(platform.window())?;

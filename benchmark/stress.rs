@@ -402,6 +402,7 @@ fn build_cube_grid(scenario: &Scenario) -> Result<(SceneManager, ResourceManager
     scene.set_viewpoint(ViewpointState {
         position: camera_position,
         direction: -camera_position.normalize(),
+        roll: 0.0,
         fov_y: 60.0_f32.to_radians(),
     })?;
     let root = scene.root_node();

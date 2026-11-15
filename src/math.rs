@@ -14,10 +14,19 @@ const FAR: f32 = 100.0;
 /// World up axis used to build the view matrix in [`view`].
 const UP: Vec3 = Vec3::Y;
 
-/// Builds the view matrix (world -> view) for a camera at `position`
-/// looking along `direction`, with `+Y` as the world up axis.
-pub fn view(position: Vec3, direction: Vec3) -> Mat4 {
-    Mat4::look_at_rh(position, position + direction, UP)
+/// Builds the view matrix (world -> view) for a camera at `position` looking
+/// along `direction`, with `+Y` as the world up axis and `roll` radians of
+/// rotation about the view direction.
+///
+/// A zero `roll` keeps the camera's up axis in the vertical plane of
+/// `direction`. Positive `roll` rotates the camera's up vector toward its right
+/// vector, so the scene appears rotated counter-clockwise.
+pub fn view(position: Vec3, direction: Vec3, roll: f32) -> Mat4 {
+    let forward = direction.normalize_or_zero();
+    let right = forward.cross(UP).normalize_or_zero();
+    let up = right.cross(forward);
+    let (sin, cos) = roll.sin_cos();
+    Mat4::look_at_rh(position, position + direction, up * cos + right * sin)
 }
 
 /// Builds a right-handed perspective projection matrix (view -> clip) with a
@@ -40,13 +49,66 @@ mod tests {
 
     const EPSILON: f32 = 1e-5;
 
+    const POSITION: Vec3 = Vec3::new(0.0, 0.0, 5.0);
+    const FORWARD: Vec3 = Vec3::new(0.0, 0.0, -1.0);
+
     #[test]
     fn view_moves_the_camera_position_to_the_origin() {
-        let view_matrix = view(Vec3::new(0.0, 0.0, 5.0), Vec3::new(0.0, 0.0, -1.0));
+        let view_matrix = view(POSITION, FORWARD, 0.0);
 
-        let origin = view_matrix.transform_point3(Vec3::new(0.0, 0.0, 5.0));
+        let origin = view_matrix.transform_point3(POSITION);
 
         assert!(origin.abs_diff_eq(Vec3::ZERO, EPSILON));
+    }
+
+    #[test]
+    fn zero_roll_keeps_the_world_up_axis() {
+        let view_matrix = view(POSITION, FORWARD, 0.0);
+
+        let up = view_matrix.inverse().transform_vector3(Vec3::Y);
+
+        assert!(up.abs_diff_eq(Vec3::Y, EPSILON));
+    }
+
+    #[test]
+    fn quarter_turn_roll_rotates_the_up_axis_toward_the_right_axis() {
+        let view_matrix = view(POSITION, FORWARD, std::f32::consts::FRAC_PI_2);
+
+        let up = view_matrix.inverse().transform_vector3(Vec3::Y);
+        let right = view_matrix.inverse().transform_vector3(Vec3::X);
+
+        assert!(up.abs_diff_eq(Vec3::X, EPSILON));
+        assert!(right.abs_diff_eq(-Vec3::Y, EPSILON));
+    }
+
+    #[test]
+    fn roll_builds_an_orthonormal_frame_for_a_tilted_direction() {
+        let view_matrix = view(POSITION, Vec3::new(1.0, -0.5, -1.0), 0.7);
+
+        let rotation = view_matrix.inverse();
+        let axes = [
+            rotation.transform_vector3(Vec3::X),
+            rotation.transform_vector3(Vec3::Y),
+            rotation.transform_vector3(Vec3::Z),
+        ];
+
+        assert!(view_matrix.is_finite());
+        for axis in axes {
+            assert!((axis.length() - 1.0).abs() < EPSILON);
+        }
+        for (index, axis) in axes.iter().enumerate() {
+            for other in &axes[index + 1..] {
+                assert!(axis.dot(*other).abs() < EPSILON);
+            }
+        }
+    }
+
+    #[test]
+    fn full_turn_roll_restores_the_zero_roll_view() {
+        let zero_roll = view(POSITION, FORWARD, 0.0);
+        let full_turn = view(POSITION, FORWARD, std::f32::consts::TAU);
+
+        assert!(full_turn.abs_diff_eq(zero_roll, EPSILON));
     }
 
     #[test]
