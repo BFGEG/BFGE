@@ -1,7 +1,7 @@
 //! GPU vertex and index buffers for the wgpu backend.
 
-use std::collections::HashMap;
 use std::collections::hash_map::Entry;
+use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
 use image::GenericImageView;
@@ -65,32 +65,50 @@ fn vertex_normals(submesh: &SubMesh) -> Vec<Vec3> {
 }
 
 #[derive(Debug)]
-pub(crate) struct GpuMaterial {
-    pub(crate) bind_group: wgpu::BindGroup,
+/// WGPU-specific structure for materials.
+pub struct GpuMaterial {
+    /// Texture bind group.
+    pub bind_group: wgpu::BindGroup,
+}
+
+/// WGPU-specific structure for meshes.
+#[derive(Debug)]
+pub struct GpuMesh {
+    /// Vector of submeshes.
+    pub submeshes: Vec<GpuSubMesh>,
+    /// Default color of mesh in case of materials absence.
+    pub color: [f32; 4],
 }
 
 #[derive(Debug)]
-pub(crate) struct GpuMesh {
-    pub(crate) submeshes: Vec<GpuSubMesh>,
-    pub(crate) color: [f32; 4],
-}
-
-#[derive(Debug)]
-pub(crate) struct GpuSubMesh {
-    pub(crate) vertices: wgpu::Buffer,
-    pub(crate) indices: wgpu::Buffer,
-    pub(crate) index_count: u32,
-    pub(crate) material: usize,
+/// WGPU-specific structure for submeshes.
+pub struct GpuSubMesh {
+    /// WGPU vertex buffer.
+    pub vertex_buffer: wgpu::Buffer,
+    /// WGPU index buffer.
+    pub index_buffer: wgpu::Buffer,
+    /// Index count.
+    pub index_count: u32,
+    /// Material identificator.
+    pub material: usize,
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct MeshCache {
+/// Cache meshes in hashmap.
+pub struct MeshCache {
+    /// Hashmap of WGPU meshhes.
     meshes: HashMap<MeshHandle, GpuMesh>,
 }
 
+#[derive(Debug, Hash, Eq, PartialEq)]
+/// A pair of mesh handle and material identificator.
+struct MaterialHandle(MeshHandle, usize);
+
 #[derive(Debug, Default)]
-pub(crate) struct MaterialCache {
-    materials: HashMap<(MeshHandle, usize), GpuMaterial>,
+/// Cache materials in hashmap.
+pub struct MaterialCache {
+    /// Hashmap of WGPU materials.
+    materials: HashMap<MaterialHandle, GpuMaterial>,
 }
 
 impl MeshCache {
@@ -127,7 +145,7 @@ impl MaterialCache {
         handle: MeshHandle,
         id: usize,
     ) -> Result<&GpuMaterial, RenderError> {
-        match self.materials.entry((handle, id)) {
+        match self.materials.entry(MaterialHandle(handle, id)) {
             Entry::Occupied(entry) => Ok(entry.into_mut()),
             Entry::Vacant(entry) => {
                 let mesh = resources.mesh(handle).ok_or_else(|| {
@@ -285,8 +303,8 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
                 wgpu::BufferUsages::INDEX,
             );
             GpuSubMesh {
-                vertices: vertex_buffer,
-                indices: index_buffer,
+                vertex_buffer,
+                index_buffer,
                 index_count: submesh.indices.len() as u32,
                 material: submesh.material,
             }

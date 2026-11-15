@@ -170,8 +170,11 @@ impl RenderSystem for WgpuRenderSystem {
                             submesh.material,
                         )?;
                         pass.set_bind_group(2, &material.bind_group, &[]);
-                        pass.set_vertex_buffer(0, submesh.vertices.slice(..));
-                        pass.set_index_buffer(submesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                        pass.set_vertex_buffer(0, submesh.vertex_buffer.slice(..));
+                        pass.set_index_buffer(
+                            submesh.index_buffer.slice(..),
+                            wgpu::IndexFormat::Uint32,
+                        );
                         pass.draw_indexed(0..submesh.index_count, 0, 0..1);
                         stats.draw_calls += 1;
                     }
