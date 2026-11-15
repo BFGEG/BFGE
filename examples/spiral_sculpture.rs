@@ -102,6 +102,7 @@ fn camera_at(elapsed: f32) -> ViewpointState {
     ViewpointState {
         position,
         direction: (Vec3::new(0.0, 1.5, 0.0) - position).normalize_or_zero(),
+        roll: 0.0,
         fov_y: 55.0_f32.to_radians(),
     }
 }

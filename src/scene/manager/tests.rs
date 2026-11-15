@@ -161,6 +161,7 @@ fn frame_camera_is_placed_at_the_viewpoint() {
     let viewpoint = ViewpointState {
         position,
         direction: Vec3::new(0.0, 0.0, -1.0),
+        roll: 0.0,
         fov_y: 60.0_f32.to_radians(),
     };
     scene
@@ -171,6 +172,24 @@ fn frame_camera_is_placed_at_the_viewpoint() {
 
     let origin = frame.camera.view.transform_point3(position);
     assert!(origin.abs_diff_eq(Vec3::ZERO, EPSILON));
+}
+
+#[test]
+fn viewpoint_roll_rotates_the_frame_camera_about_the_view_direction() {
+    let mut scene = SceneManager::new();
+    scene
+        .set_viewpoint(ViewpointState {
+            roll: std::f32::consts::FRAC_PI_2,
+            ..ViewpointState::default()
+        })
+        .expect("the scene accepts a valid viewpoint");
+
+    let frame = scene.build_render_frame(WINDOW);
+
+    let up = frame.camera.view.inverse().transform_vector3(Vec3::Y);
+    let right = frame.camera.view.inverse().transform_vector3(Vec3::X);
+    assert!(up.abs_diff_eq(Vec3::X, EPSILON));
+    assert!(right.abs_diff_eq(-Vec3::Y, EPSILON));
 }
 
 #[test]
@@ -385,6 +404,7 @@ fn set_viewpoint_replaces_the_state() {
     let viewpoint = ViewpointState {
         position: Vec3::new(9.0, 8.0, 7.0),
         direction: Vec3::new(1.0, 0.0, 0.0),
+        roll: 0.25,
         fov_y: 30.0_f32.to_radians(),
     };
 
