@@ -1,7 +1,7 @@
 //! GPU vertex and index buffers for the wgpu backend.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use bytemuck::{Pod, Zeroable};
 use image::GenericImageView;
