@@ -3,14 +3,19 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use std::collections::HashSet;
 use winit::application::ApplicationHandler;
-use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::{DeviceEvent, DeviceId, ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::PhysicalKey;
 use winit::platform::pump_events::EventLoopExtPumpEvents;
 #[cfg(test)]
 use winit::window::Fullscreen;
 use winit::window::{Window as NativeWindow, WindowId};
+
+pub use winit::event::MouseButton;
+pub use winit::keyboard::KeyCode;
 
 /// Module-wide `Result` with [`PlatformError`] as the error type.
 type Result<T> = core::result::Result<T, PlatformError>;
@@ -30,6 +35,103 @@ pub struct WindowSize {
     pub width: u32,
     /// Height in pixels.
     pub height: u32,
+}
+
+/// Input collected from window events before the current frame.
+///
+/// The engine updates the state from window events before frame handlers run
+/// and resets mouse motion deltas after the end-of-frame handlers. Pressed keys
+/// and buttons stay pressed until the matching release event arrives or the
+/// window loses focus.
+///
+/// Read the state inside frame handlers through
+/// [`crate::FrameContext::input`].
+#[derive(Debug, Default)]
+pub struct InputState {
+    pressed_key: HashSet<KeyCode>,
+    pressed_mouse: HashSet<MouseButton>,
+    cursor_pos: PhysicalPosition<f64>,
+    mouse_delta_x: f64,
+    mouse_delta_y: f64,
+}
+
+impl InputState {
+    pub(crate) fn handle_window_event(&mut self, event: &WindowEvent) {
+        match event {
+            WindowEvent::KeyboardInput {
+                event:
+                    KeyEvent {
+                        physical_key: PhysicalKey::Code(code),
+                        state,
+                        ..
+                    },
+                ..
+            } => self.set_key(*code, *state),
+            WindowEvent::MouseInput { state, button, .. } => self.set_mouse_button(*button, *state),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor_pos = *position;
+            }
+            WindowEvent::Focused(false) => {
+                self.pressed_key.clear();
+                self.pressed_mouse.clear();
+            }
+            _ => {}
+        }
+    }
+
+    pub(crate) fn set_key(&mut self, code: KeyCode, state: ElementState) {
+        match state {
+            ElementState::Pressed => {
+                self.pressed_key.insert(code);
+            }
+            ElementState::Released => {
+                self.pressed_key.remove(&code);
+            }
+        }
+    }
+
+    pub(crate) fn set_mouse_button(&mut self, button: MouseButton, state: ElementState) {
+        match state {
+            ElementState::Pressed => {
+                self.pressed_mouse.insert(button);
+            }
+            ElementState::Released => {
+                self.pressed_mouse.remove(&button);
+            }
+        }
+    }
+
+    pub(crate) fn handle_device_state(&mut self, event: &DeviceEvent) {
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+            self.mouse_delta_x += *dx;
+            self.mouse_delta_y += *dy;
+        }
+    }
+
+    pub(crate) fn end_frame(&mut self) {
+        self.mouse_delta_x = 0.0;
+        self.mouse_delta_y = 0.0;
+    }
+
+    /// Returns whether `key` is currently held down.
+    pub fn is_key_pressed(&self, key: KeyCode) -> bool {
+        self.pressed_key.contains(&key)
+    }
+
+    /// Returns whether mouse `button` is currently held down.
+    pub fn is_mouse_pressed(&self, button: MouseButton) -> bool {
+        self.pressed_mouse.contains(&button)
+    }
+
+    /// Returns the cursor position in physical pixels.
+    pub fn cursor_position(&self) -> (f64, f64) {
+        (self.cursor_pos.x, self.cursor_pos.y)
+    }
+
+    /// Returns the mouse motion accumulated since the previous frame.
+    pub fn mouse_delta(&self) -> (f64, f64) {
+        (self.mouse_delta_x, self.mouse_delta_y)
+    }
 }
 
 impl WindowSize {
@@ -106,6 +208,7 @@ impl Window {
 #[derive(Debug)]
 pub struct PlatformAdapter {
     window: Window,
+    input_state: InputState,
 }
 
 impl PlatformAdapter {
@@ -137,6 +240,7 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Native(native),
             },
+            input_state: Default::default(),
         })
     }
 
@@ -165,21 +269,39 @@ impl PlatformAdapter {
             window: Window {
                 inner: WindowInner::Test(size),
             },
+            input_state: Default::default(),
         }
     }
 
+    /// Returns the input collected by the last [`Self::pump_events`] call.
+    pub(crate) fn input(&self) -> &InputState {
+        &self.input_state
+    }
+
+    #[cfg(test)]
+    pub(crate) fn input_mut(&mut self) -> &mut InputState {
+        &mut self.input_state
+    }
+
+    /// Drops the per-frame mouse motion accumulated for the current frame.
+    pub(crate) fn end_input_frame(&mut self) {
+        self.input_state.end_frame();
+    }
+
     pub(crate) fn pump_events(
-        &self,
+        &mut self,
         event_loop: &mut EventLoop<()>,
         timeout: Option<Duration>,
     ) -> Vec<PlatformEvent> {
+        let window_id = match &self.window.inner {
+            WindowInner::Native(window) => Some(window.id()),
+            #[cfg(test)]
+            WindowInner::Test(_) => None,
+        };
         let mut recorder = EventRecorder {
-            window_id: match &self.window.inner {
-                WindowInner::Native(window) => Some(window.id()),
-                #[cfg(test)]
-                WindowInner::Test(_) => None,
-            },
+            window_id,
             events: Vec::new(),
+            input_state: &mut self.input_state,
         };
         event_loop.pump_app_events(timeout, &mut recorder);
         recorder.events
@@ -212,15 +334,17 @@ pub(crate) enum PlatformEvent {
     Resized(WindowSize),
 }
 
-struct EventRecorder {
+struct EventRecorder<'a> {
     window_id: Option<WindowId>,
     events: Vec<PlatformEvent>,
+    input_state: &'a mut InputState,
 }
 
-impl EventRecorder {
-    fn record(&mut self, window_id: WindowId, event: WindowEvent) {
+impl<'a> EventRecorder<'a> {
+    fn record(&mut self, window_id: WindowId, window_event: WindowEvent) {
+        self.input_state.handle_window_event(&window_event);
         if self.window_id == Some(window_id) {
-            match event {
+            match window_event {
                 WindowEvent::CloseRequested => self.events.push(PlatformEvent::CloseRequested),
                 WindowEvent::Resized(size) => self.events.push(PlatformEvent::Resized(
                     WindowSize::new(size.width, size.height),
@@ -231,7 +355,7 @@ impl EventRecorder {
     }
 }
 
-impl ApplicationHandler for EventRecorder {
+impl ApplicationHandler for EventRecorder<'_> {
     fn resumed(&mut self, _event_loop: &ActiveEventLoop) {}
 
     fn window_event(
@@ -241,6 +365,15 @@ impl ApplicationHandler for EventRecorder {
         event: WindowEvent,
     ) {
         self.record(window_id, event);
+    }
+
+    fn device_event(
+        &mut self,
+        _event_loop: &ActiveEventLoop,
+        _device_id: DeviceId,
+        event: DeviceEvent,
+    ) {
+        self.input_state.handle_device_state(&event);
     }
 }
 
@@ -445,7 +578,7 @@ mod tests {
         use crate::scene::lighting::SceneLighting;
 
         let mut event_loop = EventLoop::builder().with_any_thread(true).build()?;
-        let platform = PlatformAdapter::create_window(
+        let mut platform = PlatformAdapter::create_window(
             WindowDescriptor::new(TEST_WINDOW_TITLE, 320, 240),
             &mut event_loop,
         )?;
@@ -561,9 +694,11 @@ mod event_tests {
     #[test]
     fn recorder_preserves_resize_and_close_order() {
         let window_id = WindowId::from(1);
+        let mut input_state = InputState::default();
         let mut recorder = EventRecorder {
             window_id: Some(window_id),
             events: Vec::new(),
+            input_state: &mut input_state,
         };
         recorder.record(window_id, WindowEvent::Resized(PhysicalSize::new(0, 600)));
         recorder.record(window_id, WindowEvent::CloseRequested);
@@ -578,9 +713,11 @@ mod event_tests {
 
     #[test]
     fn recorder_ignores_events_from_other_sessions() {
+        let mut input_state = InputState::default();
         let mut recorder = EventRecorder {
             window_id: Some(WindowId::from(1)),
             events: Vec::new(),
+            input_state: &mut input_state,
         };
         recorder.record(WindowId::from(2), WindowEvent::CloseRequested);
         recorder.record(
@@ -593,12 +730,72 @@ mod event_tests {
     #[test]
     fn recorder_ignores_input_and_redraw_events() {
         let window_id = WindowId::from(1);
+        let mut input_state = InputState::default();
         let mut recorder = EventRecorder {
             window_id: Some(window_id),
             events: Vec::new(),
+            input_state: &mut input_state,
         };
         recorder.record(window_id, WindowEvent::Focused(true));
         recorder.record(window_id, WindowEvent::RedrawRequested);
         assert!(recorder.events.is_empty());
+    }
+
+    fn mouse_input(state: ElementState, button: MouseButton) -> WindowEvent {
+        WindowEvent::MouseInput {
+            device_id: DeviceId::dummy(),
+            state,
+            button,
+        }
+    }
+
+    #[test]
+    fn input_state_tracks_key_press_and_release() {
+        let mut input_state = InputState::default();
+        input_state.set_key(KeyCode::KeyW, ElementState::Pressed);
+        assert!(input_state.is_key_pressed(KeyCode::KeyW));
+        assert!(!input_state.is_key_pressed(KeyCode::KeyA));
+        input_state.set_key(KeyCode::KeyW, ElementState::Released);
+        assert!(!input_state.is_key_pressed(KeyCode::KeyW));
+    }
+
+    #[test]
+    fn input_state_tracks_mouse_button_press_and_release() {
+        let mut input_state = InputState::default();
+        input_state.handle_window_event(&mouse_input(ElementState::Pressed, MouseButton::Left));
+        assert!(input_state.is_mouse_pressed(MouseButton::Left));
+        assert!(!input_state.is_mouse_pressed(MouseButton::Right));
+        input_state.handle_window_event(&mouse_input(ElementState::Released, MouseButton::Left));
+        assert!(!input_state.is_mouse_pressed(MouseButton::Left));
+    }
+
+    #[test]
+    fn input_state_clears_pressed_input_on_focus_loss() {
+        let mut input_state = InputState::default();
+        input_state.set_key(KeyCode::KeyW, ElementState::Pressed);
+        input_state.handle_window_event(&mouse_input(ElementState::Pressed, MouseButton::Left));
+        input_state.handle_window_event(&WindowEvent::Focused(false));
+        assert!(!input_state.is_key_pressed(KeyCode::KeyW));
+        assert!(!input_state.is_mouse_pressed(MouseButton::Left));
+    }
+
+    #[test]
+    fn input_state_accumulates_mouse_motion_and_resets_it_per_frame() {
+        let mut input_state = InputState::default();
+        input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (2.0, -3.0) });
+        input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (1.0, 1.0) });
+        assert_eq!(input_state.mouse_delta(), (3.0, -2.0));
+        input_state.end_frame();
+        assert_eq!(input_state.mouse_delta(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn input_state_tracks_cursor_position() {
+        let mut input_state = InputState::default();
+        input_state.handle_window_event(&WindowEvent::CursorMoved {
+            device_id: DeviceId::dummy(),
+            position: PhysicalPosition::new(12.0, 34.0),
+        });
+        assert_eq!(input_state.cursor_position(), (12.0, 34.0));
     }
 }
