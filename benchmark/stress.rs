@@ -402,6 +402,7 @@ fn build_cube_grid(scenario: &Scenario) -> Result<(SceneManager, ResourceManager
     scene.set_viewpoint(ViewpointState {
         position: camera_position,
         direction: -camera_position.normalize(),
+        roll: 0.0,
         fov_y: 60.0_f32.to_radians(),
     })?;
     let root = scene.root_node();
@@ -553,7 +554,7 @@ fn measure_window<'a>(
 ) -> Result<(ScenarioResult<'a>, wgpu::AdapterInfo), StressError> {
     let size = WindowSize::new(config.width, config.height);
     let title = format!("{WINDOW_TITLE}: {} objects", scenario.objects);
-    let platform = PlatformAdapter::new(
+    let mut platform = PlatformAdapter::new(
         WindowDescriptor::new(&title, config.width, config.height),
         event_loop,
     )?;
@@ -572,7 +573,7 @@ fn measure_window<'a>(
     let animation_start = Instant::now();
     let warmup_end = animation_start + Duration::from_secs(config.warmup_seconds);
     while Instant::now() < warmup_end {
-        pump_window(&platform, event_loop, size)?;
+        pump_window(&mut platform, event_loop, size)?;
         if scenario.scene_kind == SceneKind::CubeGrid {
             animate_cube_grid(scene, animation_start.elapsed().as_secs_f32())?;
         }
@@ -595,7 +596,7 @@ fn measure_window<'a>(
     let mut next_memory = start + MEMORY_SAMPLE_INTERVAL;
     while Instant::now() < end {
         let pass_start = Instant::now();
-        pump_window(&platform, event_loop, size)?;
+        pump_window(&mut platform, event_loop, size)?;
         if scenario.scene_kind == SceneKind::CubeGrid {
             animate_cube_grid(scene, animation_start.elapsed().as_secs_f32())?;
         }
@@ -664,7 +665,7 @@ fn frame_window(
 }
 
 fn pump_window(
-    platform: &PlatformAdapter,
+    platform: &mut PlatformAdapter,
     event_loop: &mut EventLoop<()>,
     size: WindowSize,
 ) -> Result<(), StressError> {

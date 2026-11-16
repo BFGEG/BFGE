@@ -2,29 +2,47 @@
 
 use std::path::Path;
 
+use crate::platform::InputState;
 use crate::resources::manager::ResourceManager;
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
 use crate::scene::manager::SceneManager;
 use crate::systems::loading::{self, ModelLoadError};
 
-/// Borrows the current scene and resources for one frame callback.
+/// Borrows the current scene, resources and input for one frame callback.
 ///
 /// Changes are immediate: start callbacks affect the current frame, while end
 /// callbacks affect the next frame. Model loading is synchronous.
 pub struct FrameContext<'a> {
     scene: &'a mut SceneManager,
     resources: &'a mut ResourceManager,
+    input: &'a InputState,
 }
 
 impl<'a> FrameContext<'a> {
-    pub(crate) fn new(scene: &'a mut SceneManager, resources: &'a mut ResourceManager) -> Self {
-        Self { scene, resources }
+    pub(crate) fn new(
+        scene: &'a mut SceneManager,
+        resources: &'a mut ResourceManager,
+        input: &'a InputState,
+    ) -> Self {
+        Self {
+            scene,
+            resources,
+            input,
+        }
     }
 
     /// Returns mutable access to the scene for this callback.
     pub fn scene(&mut self) -> &mut dyn SceneApi {
         self.scene
+    }
+
+    /// Returns the input collected from window events before this frame.
+    ///
+    /// The state is read-only: pressed keys and buttons, cursor position and
+    /// the mouse motion accumulated before the callback.
+    pub fn input(&self) -> &InputState {
+        self.input
     }
 
     /// Loads `path` and attaches a new object to `parent` during the callback.

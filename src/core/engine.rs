@@ -78,17 +78,28 @@ impl Engine {
         clock: &mut FrameClock,
         now: &mut impl FnMut() -> Instant,
     ) -> Result<(), EngineError> {
+        let input = self
+            .platform
+            .as_ref()
+            .ok_or(EngineError::NotInitialized)?
+            .input();
         clock.begin_frame(now());
         for event in self.event_loop.callbacks() {
-            let mut context = FrameContext::new(&mut self.parts.scene, &mut self.parts.resources);
+            let mut context =
+                FrameContext::new(&mut self.parts.scene, &mut self.parts.resources, input);
             (event.frame_started)(&mut context, &clock.event_time(now()))?;
         }
         let frame = self.parts.scene.build_render_frame(size);
         self.parts.renderer.render(&frame, &self.parts.resources)?;
         for event in self.event_loop.callbacks() {
-            let mut context = FrameContext::new(&mut self.parts.scene, &mut self.parts.resources);
+            let mut context =
+                FrameContext::new(&mut self.parts.scene, &mut self.parts.resources, input);
             (event.frame_ended)(&mut context, &clock.event_time(now()))?;
         }
+        self.platform
+            .as_mut()
+            .ok_or(EngineError::NotInitialized)?
+            .end_input_frame();
         Ok(())
     }
 
@@ -173,7 +184,7 @@ impl EngineApi for Engine {
             |engine, timeout| {
                 let platform = engine
                     .platform
-                    .as_ref()
+                    .as_mut()
                     .ok_or(EngineError::NotInitialized)?;
                 let event_loop = engine
                     .winit_loop

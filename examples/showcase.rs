@@ -120,6 +120,7 @@ fn camera_at(elapsed: f32) -> ViewpointState {
     ViewpointState {
         position,
         direction: (target - position).normalize_or_zero(),
+        roll: 0.0,
         fov_y: 60.0_f32.to_radians(),
     }
 }

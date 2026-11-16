@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::math::Vec3;
-use crate::platform::Window;
+use crate::platform::{InputState, KeyCode, Window};
 use crate::render::frame::RenderFrame;
 use crate::render::renderer::Renderer;
 use crate::render::stats::RenderStats;
@@ -10,6 +10,7 @@ use crate::render::system::{RenderError, RenderSystem};
 use crate::resources::library::{BuiltinMesh, MeshLibrary};
 use crate::resources::manager::ResourceManager;
 use crate::scene::transform::Transform;
+use winit::event::{DeviceEvent, ElementState};
 
 use super::*;
 
@@ -248,7 +249,9 @@ fn event_registration_retains_handlers_without_calling_them() {
         time_since_last_event: 0.0,
         time_since_last_frame: 0.0,
     };
-    let mut context = FrameContext::new(&mut engine.parts.scene, &mut engine.parts.resources);
+    let input = InputState::default();
+    let mut context =
+        FrameContext::new(&mut engine.parts.scene, &mut engine.parts.resources, &input);
     for event in engine.event_loop.callbacks() {
         (event.frame_started)(&mut context, &time).expect("the registered test handler succeeds");
         (event.frame_ended)(&mut context, &time).expect("the registered test handler succeeds");
@@ -442,6 +445,47 @@ fn run_batches(
         },
         || time,
     )
+}
+
+#[test]
+fn frame_handlers_read_the_input_collected_for_the_frame() {
+    let (mut engine, _) = initialized_engine();
+    let input = engine
+        .platform
+        .as_mut()
+        .expect("the initialized engine owns a platform adapter")
+        .input_mut();
+    input.set_key(KeyCode::KeyW, ElementState::Pressed);
+    input.handle_device_state(&DeviceEvent::MouseMotion { delta: (4.0, 0.0) });
+
+    let seen = Rc::new(RefCell::new(None));
+    let handler_seen = Rc::clone(&seen);
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                *handler_seen.borrow_mut() = Some((
+                    context.input().is_key_pressed(KeyCode::KeyW),
+                    context.input().mouse_delta(),
+                ));
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .expect("frame handler registration succeeds");
+
+    run_batches(&mut engine, [vec![], vec![PlatformEvent::CloseRequested]])
+        .expect("one frame succeeds before closing");
+
+    assert_eq!(*seen.borrow(), Some((true, (4.0, 0.0))));
+    assert_eq!(
+        engine
+            .platform
+            .as_ref()
+            .expect("the platform adapter survives the loop")
+            .input()
+            .mouse_delta(),
+        (0.0, 0.0)
+    );
 }
 
 #[test]
