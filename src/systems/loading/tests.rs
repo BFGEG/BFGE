@@ -2,7 +2,7 @@ use serde_json::json;
 
 use super::*;
 
-use crate::math::Vec3;
+use crate::math::{Vec2, Vec3};
 use crate::scene::api::SceneApi;
 use crate::scene::node::SceneNode;
 use crate::scene::viewpoint::ViewpointState;
@@ -470,6 +470,21 @@ fn obj_reads_separate_position_uv_and_normal_indices() {
 
     assert_eq!(mesh.submeshes[0].vertices[1].position, Vec3::X);
     assert_eq!(mesh.submeshes[0].vertices[2].position, Vec3::Y);
+}
+
+#[test]
+fn obj_maps_texture_coordinates_through_uv_indices() {
+    let directory = directory();
+    let path = write_obj(
+        directory.path(),
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nf 1/1 2/2 3/2\n",
+    );
+
+    let mesh = read_mesh(&path).expect("UV indices select the matching texture coordinate");
+
+    assert_eq!(mesh.submeshes[0].vertices[0].uv, Vec2::new(0.0, 1.0));
+    assert_eq!(mesh.submeshes[0].vertices[1].uv, Vec2::new(1.0, 1.0));
+    assert_eq!(mesh.submeshes[0].vertices[2].uv, Vec2::new(1.0, 1.0));
 }
 
 #[test]

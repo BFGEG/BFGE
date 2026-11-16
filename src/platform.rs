@@ -520,7 +520,7 @@ mod tests {
         // A handle that was never registered must surface as an error rather
         // than reaching GPU validation. Uses a real device when available and
         // is skipped otherwise.
-        use crate::backend::wgpu::buffer::MeshBufferCache;
+        use crate::backend::wgpu::buffer::MeshCache;
         use crate::resources::handle::MeshHandle;
         use crate::resources::manager::ResourceManager;
 
@@ -529,9 +529,9 @@ mod tests {
             None => return,
         };
         let resources = ResourceManager::new();
-        let mut cache = MeshBufferCache::default();
+        let mut cache = MeshCache::default();
 
-        let result = cache.get(&device, &resources, MeshHandle::new(7));
+        let result = cache.get_mesh(&device, &resources, MeshHandle::new(7));
 
         assert!(matches!(
             result,

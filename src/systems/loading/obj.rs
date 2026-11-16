@@ -1,10 +1,11 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
 
 use super::{DEFAULT_MODEL_COLOR, LoadResult, parse_error, read_file};
 
-use crate::math::Vec3;
-use crate::resources::mesh::{Mesh, SubMesh, Vertex};
+use crate::math::{Vec2, Vec3};
+use crate::resources::mesh::{Material, Mesh, SubMesh, TobjMaterial, Vertex};
 
 const POLYGON_TOLERANCE: f32 = 1e-5;
 
@@ -38,6 +39,7 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
     let mut parts = Vec::new();
     for model in models {
         let mesh = model.mesh;
+        let material_id = mesh.material_id.unwrap_or(0);
         if mesh.indices.is_empty() {
             continue;
         }
@@ -54,30 +56,79 @@ pub(super) fn load(path: &Path) -> LoadResult<Mesh> {
         if !mesh.positions.len().is_multiple_of(3) {
             return Err(parse_error(path, "OBJ positions must contain XYZ triples"));
         }
-        let vertices = mesh
-            .positions
-            .chunks_exact(3)
-            .map(|position| Vertex {
-                position: Vec3::new(position[0], position[1], position[2]),
-            })
-            .collect::<Vec<_>>();
-        if vertices.iter().any(|vertex| !vertex.position.is_finite())
+        let positions = mesh.positions.chunks_exact(3).collect::<Vec<_>>();
+        let texcoords = mesh.texcoords.chunks_exact(2).collect::<Vec<_>>();
+        let has_texcoords = !texcoords.is_empty();
+        if positions
+            .iter()
+            .any(|position| !Vec3::new(position[0], position[1], position[2]).is_finite())
             || mesh
                 .indices
                 .iter()
-                .any(|&index| index as usize >= vertices.len())
+                .any(|&index| index as usize >= positions.len())
+            || (has_texcoords
+                && (mesh.texcoord_indices.len() != mesh.indices.len()
+                    || mesh
+                        .texcoord_indices
+                        .iter()
+                        .any(|&index| index as usize >= texcoords.len())))
         {
             return Err(parse_error(
                 path,
                 "OBJ contains non-finite positions or out-of-range indices",
             ));
         }
-        let indices = triangulate(path, mesh.indices, &mesh.face_arities, &vertices)?;
-        parts.push(SubMesh { vertices, indices });
+
+        let mut vertices = Vec::with_capacity(positions.len());
+        let mut index_map = HashMap::new();
+        let mut indices = Vec::with_capacity(mesh.indices.len());
+        for (corner, &position_index) in mesh.indices.iter().enumerate() {
+            let position_index = position_index as usize;
+            let texcoord_index = if has_texcoords {
+                Some(mesh.texcoord_indices[corner] as usize)
+            } else {
+                None
+            };
+            let vertex_index = *index_map
+                .entry((position_index, texcoord_index))
+                .or_insert_with(|| {
+                    let vertex_index = vertices.len() as u32;
+                    vertices.push(Vertex {
+                        position: Vec3::new(
+                            positions[position_index][0],
+                            positions[position_index][1],
+                            positions[position_index][2],
+                        ),
+                        uv: texcoord_index
+                            .and_then(|index| texcoords.get(index))
+                            .map(|uv| Vec2::new(uv[0], 1.0 - uv[1]))
+                            .unwrap_or(Vec2::ZERO),
+                    });
+                    vertex_index
+                });
+            indices.push(vertex_index);
+        }
+
+        let indices = triangulate(path, indices, &mesh.face_arities, &vertices)?;
+        parts.push(SubMesh {
+            vertices,
+            indices,
+            material: material_id,
+        });
     }
+    let materials = materials
+        .into_iter()
+        .map(|m| {
+            Material::ObjMaterial(TobjMaterial {
+                material: m,
+                path: path.to_path_buf(),
+            })
+        })
+        .collect();
     Ok(Mesh {
         submeshes: parts,
         color: color.unwrap_or(DEFAULT_MODEL_COLOR),
+        materials,
     })
 }
 
