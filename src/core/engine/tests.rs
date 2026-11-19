@@ -455,6 +455,7 @@ fn frame_handlers_read_the_input_collected_for_the_frame() {
         .as_mut()
         .expect("the initialized engine owns a platform adapter")
         .input_mut();
+    input.handle_window_event(&winit::event::WindowEvent::Focused(true));
     input.set_key(KeyCode::KeyW, ElementState::Pressed);
     input.handle_device_state(&DeviceEvent::MouseMotion { delta: (4.0, 0.0) });
 
@@ -464,6 +465,7 @@ fn frame_handlers_read_the_input_collected_for_the_frame() {
         .add_event(EngineEvent {
             frame_started: Box::new(move |context, _| {
                 *handler_seen.borrow_mut() = Some((
+                    context.input().is_focused(),
                     context.input().is_key_pressed(KeyCode::KeyW),
                     context.input().mouse_delta(),
                 ));
@@ -476,7 +478,7 @@ fn frame_handlers_read_the_input_collected_for_the_frame() {
     run_batches(&mut engine, [vec![], vec![PlatformEvent::CloseRequested]])
         .expect("one frame succeeds before closing");
 
-    assert_eq!(*seen.borrow(), Some((true, (4.0, 0.0))));
+    assert_eq!(*seen.borrow(), Some((true, true, (4.0, 0.0))));
     assert_eq!(
         engine
             .platform
