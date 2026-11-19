@@ -45,6 +45,7 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
     engine.scene().set_viewpoint(ViewpointState {
         position: Vec3::new(0.0, 2.0, 6.5),
         direction: Vec3::new(0.0, -0.25, -1.0),
+        roll: 0.0,
         fov_y: 55.0_f32.to_radians(),
     })?;
 
