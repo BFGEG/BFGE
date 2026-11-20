@@ -48,6 +48,7 @@ pub struct WindowSize {
 /// [`crate::FrameContext::input`].
 #[derive(Debug, Default)]
 pub struct InputState {
+    focused: bool,
     pressed_key: HashSet<KeyCode>,
     pressed_mouse: HashSet<MouseButton>,
     cursor_pos: PhysicalPosition<f64>,
@@ -71,9 +72,13 @@ impl InputState {
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor_pos = *position;
             }
-            WindowEvent::Focused(false) => {
-                self.pressed_key.clear();
-                self.pressed_mouse.clear();
+            WindowEvent::Focused(focused) => {
+                self.focused = *focused;
+                self.end_frame();
+                if !focused {
+                    self.pressed_key.clear();
+                    self.pressed_mouse.clear();
+                }
             }
             _ => {}
         }
@@ -102,7 +107,9 @@ impl InputState {
     }
 
     pub(crate) fn handle_device_state(&mut self, event: &DeviceEvent) {
-        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event {
+        if let DeviceEvent::MouseMotion { delta: (dx, dy) } = event
+            && self.focused
+        {
             self.mouse_delta_x += *dx;
             self.mouse_delta_y += *dy;
         }
@@ -111,6 +118,15 @@ impl InputState {
     pub(crate) fn end_frame(&mut self) {
         self.mouse_delta_x = 0.0;
         self.mouse_delta_y = 0.0;
+    }
+
+    /// Returns whether the engine window has keyboard focus.
+    ///
+    /// A default input state is unfocused. Window creation initializes this
+    /// value from the native window; subsequent focus events update it before
+    /// frame callbacks. The application can use it to pause its simulation.
+    pub fn is_focused(&self) -> bool {
+        self.focused
     }
 
     /// Returns whether `key` is currently held down.
@@ -129,6 +145,8 @@ impl InputState {
     }
 
     /// Returns the mouse motion accumulated since the previous frame.
+    ///
+    /// Focus changes clear accumulated motion; motion while unfocused is ignored.
     pub fn mouse_delta(&self) -> (f64, f64) {
         (self.mouse_delta_x, self.mouse_delta_y)
     }
@@ -236,11 +254,15 @@ impl PlatformAdapter {
         let native = bootstrap
             .result
             .ok_or_else(|| PlatformError::WindowCreation(WINDOW_NOT_RESUMED.to_owned()))??;
+        let focused = native.has_focus();
         Ok(Self {
             window: Window {
                 inner: WindowInner::Native(native),
             },
-            input_state: Default::default(),
+            input_state: InputState {
+                focused,
+                ..InputState::default()
+            },
         })
     }
 
@@ -342,8 +364,8 @@ struct EventRecorder<'a> {
 
 impl<'a> EventRecorder<'a> {
     fn record(&mut self, window_id: WindowId, window_event: WindowEvent) {
-        self.input_state.handle_window_event(&window_event);
         if self.window_id == Some(window_id) {
+            self.input_state.handle_window_event(&window_event);
             match window_event {
                 WindowEvent::CloseRequested => self.events.push(PlatformEvent::CloseRequested),
                 WindowEvent::Resized(size) => self.events.push(PlatformEvent::Resized(
@@ -782,11 +804,55 @@ mod event_tests {
     #[test]
     fn input_state_accumulates_mouse_motion_and_resets_it_per_frame() {
         let mut input_state = InputState::default();
+        input_state.handle_window_event(&WindowEvent::Focused(true));
         input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (2.0, -3.0) });
         input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (1.0, 1.0) });
         assert_eq!(input_state.mouse_delta(), (3.0, -2.0));
         input_state.end_frame();
         assert_eq!(input_state.mouse_delta(), (0.0, 0.0));
+    }
+
+    #[test]
+    fn input_state_reports_focus_and_keeps_it_across_frames() {
+        let mut input_state = InputState::default();
+        assert!(!input_state.is_focused());
+        input_state.handle_window_event(&WindowEvent::Focused(true));
+        input_state.end_frame();
+        assert!(input_state.is_focused());
+        input_state.handle_window_event(&WindowEvent::Focused(false));
+        assert!(!input_state.is_focused());
+        input_state.handle_window_event(&WindowEvent::Focused(true));
+        assert!(input_state.is_focused());
+    }
+
+    #[test]
+    fn focus_loss_discards_mouse_motion_until_focus_returns() {
+        let mut input_state = InputState::default();
+        input_state.handle_window_event(&WindowEvent::Focused(true));
+        input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (3.0, 4.0) });
+        input_state.handle_window_event(&WindowEvent::Focused(false));
+        assert_eq!(input_state.mouse_delta(), (0.0, 0.0));
+        input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (8.0, 9.0) });
+        input_state.handle_window_event(&WindowEvent::Focused(true));
+        assert_eq!(input_state.mouse_delta(), (0.0, 0.0));
+        input_state.handle_device_state(&DeviceEvent::MouseMotion { delta: (1.0, 2.0) });
+        assert_eq!(input_state.mouse_delta(), (1.0, 2.0));
+    }
+
+    #[test]
+    fn focus_from_another_window_does_not_change_input() {
+        let mut input_state = InputState::default();
+        let mut recorder = EventRecorder {
+            window_id: Some(WindowId::from(1)),
+            events: Vec::new(),
+            input_state: &mut input_state,
+        };
+        recorder.record(WindowId::from(2), WindowEvent::Focused(true));
+        assert!(!recorder.input_state.is_focused());
+        recorder.record(WindowId::from(1), WindowEvent::Focused(true));
+        assert!(recorder.input_state.is_focused());
+        recorder.record(WindowId::from(2), WindowEvent::Focused(false));
+        assert!(recorder.input_state.is_focused());
     }
 
     #[test]
