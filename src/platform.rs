@@ -215,6 +215,33 @@ impl Window {
             WindowInner::Test(size) => *size,
         }
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn hide_cursor(&self) -> Result<()> {
+        match &self.inner {
+            WindowInner::Native(window) => {
+                window.set_cursor_visible(false);
+                Ok(())
+            }
+            #[cfg(test)]
+            WindowInner::Test(_) => Err(PlatformError::WindowCreation(
+                TEST_WINDOW_UNAVAILABLE.to_owned(),
+            )),
+        }
+    }
+
+    pub(crate) fn show_cursor(&self) -> Result<()> {
+        match &self.inner {
+            WindowInner::Native(window) => {
+                window.set_cursor_visible(true);
+                Ok(())
+            }
+            #[cfg(test)]
+            WindowInner::Test(_) => Err(PlatformError::WindowCreation(
+                TEST_WINDOW_UNAVAILABLE.to_owned(),
+            )),
+        }
+    }
 }
 
 /// Owns the engine's window active for one session.

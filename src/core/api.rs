@@ -134,4 +134,10 @@ pub trait EngineApi {
     /// Returns [`ScenePersistenceError::SceneNotEmpty`] if the current scene has
     /// objects, or [`ScenePersistenceError::Restore`] if the snapshot is invalid.
     fn restore_scene(&mut self) -> Result<(), ScenePersistenceError>;
+
+    /// Hides cursor for window
+    fn hide_cursor(&self) -> Result<(), EngineError>;
+
+    /// Shows cursor for window
+    fn show_cursor(&self) -> Result<(), EngineError>;
 }

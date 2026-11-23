@@ -101,6 +101,7 @@ fn run_scene(engine: &mut Engine) -> Result<(), Box<dyn Error>> {
 fn main() -> Result<(), Box<dyn Error>> {
     let mut engine = Engine::new();
     engine.initialize(WindowDescriptor::new(WINDOW_TITLE, 800, 600))?;
+    engine.hide_cursor()?;
     let result = run_scene(&mut engine);
     let shutdown = engine.shutdown();
     result?;
