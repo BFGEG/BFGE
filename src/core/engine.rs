@@ -252,6 +252,27 @@ impl EngineApi for Engine {
             &mut self.parts.resources,
         )
     }
+
+    #[allow(dead_code)]
+    fn hide_cursor(&self) -> Result<(), EngineError> {
+        let window = self
+            .platform
+            .as_ref()
+            .ok_or(EngineError::NotInitialized)?
+            .window();
+        window.hide_cursor()?;
+        Ok(())
+    }
+
+    fn show_cursor(&self) -> Result<(), EngineError> {
+        let window = self
+            .platform
+            .as_ref()
+            .ok_or(EngineError::NotInitialized)?
+            .window();
+        window.show_cursor()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
