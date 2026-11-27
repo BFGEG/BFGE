@@ -69,6 +69,10 @@ fn vertex_normals(submesh: &SubMesh) -> Vec<Vec3> {
 pub struct GpuMaterial {
     /// Texture bind group.
     pub bind_group: wgpu::BindGroup,
+    /// Material opacity, if supplied by the model.
+    pub opacity: Option<f32>,
+    /// Whether the diffuse texture contains non-opaque pixels.
+    pub texture_transparent: bool,
 }
 
 /// WGPU-specific structure for meshes.
@@ -91,6 +95,8 @@ pub struct GpuSubMesh {
     pub index_count: u32,
     /// Material identificator.
     pub material: usize,
+    /// Model-space bounds center used to sort transparent parts.
+    pub center: Vec3,
 }
 
 #[derive(Debug, Default)]
@@ -161,13 +167,35 @@ impl MaterialCache {
     }
 }
 
+pub(crate) fn normalize_opacity(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        1.0
+    }
+}
+
+fn bounds_center(submesh: &SubMesh) -> Vec3 {
+    let Some(first) = submesh.vertices.first() else {
+        return Vec3::ZERO;
+    };
+    let (min, max) = submesh
+        .vertices
+        .iter()
+        .fold((first.position, first.position), |(min, max), vertex| {
+            (min.min(vertex.position), max.max(vertex.position))
+        });
+    min * 0.5 + max * 0.5
+}
+
 fn upload_material(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     material: &Material,
     layout: &wgpu::BindGroupLayout,
 ) -> GpuMaterial {
-    let (name, texture) = match material {
+    let mut texture_transparent = false;
+    let (name, texture, opacity) = match material {
         Material::ObjMaterial(tobj) => {
             let name = tobj.material.name.clone();
             let texture = tobj
@@ -178,15 +206,24 @@ fn upload_material(
                 .and_then(|path| image::open(path).ok())
                 .map(|image| {
                     let rgba = image.to_rgba8();
+                    texture_transparent = rgba.pixels().any(|pixel| pixel[3] < 255);
                     let (width, height) = image.dimensions();
                     create_diffuse_texture(device, queue, width, height, &rgba, &name)
                 })
                 .unwrap_or_else(|| white_texture(device, queue));
-            (name, texture)
+            (
+                name,
+                texture,
+                Some(normalize_opacity(tobj.material.dissolve.unwrap_or(1.0))),
+            )
         }
     };
     let bind_group = create_texture_bind_group(device, layout, &texture, &name);
-    GpuMaterial { bind_group }
+    GpuMaterial {
+        bind_group,
+        opacity,
+        texture_transparent,
+    }
 }
 
 fn upload_fallback_material(
@@ -196,7 +233,11 @@ fn upload_fallback_material(
 ) -> GpuMaterial {
     let texture = white_texture(device, queue);
     let bind_group = create_texture_bind_group(device, layout, &texture, FALLBACK_MATERIAL_LABEL);
-    GpuMaterial { bind_group }
+    GpuMaterial {
+        bind_group,
+        opacity: None,
+        texture_transparent: false,
+    }
 }
 
 fn white_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> wgpu::Texture {
@@ -307,6 +348,7 @@ fn upload_mesh(device: &wgpu::Device, mesh: &Mesh) -> GpuMesh {
                 index_buffer,
                 index_count: submesh.indices.len() as u32,
                 material: submesh.material,
+                center: bounds_center(submesh),
             }
         })
         .collect();
@@ -333,6 +375,20 @@ fn create_buffer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opacity_is_bounded_and_nonfinite_values_remain_opaque() {
+        for (value, expected) in [
+            (-1.0, 0.0),
+            (0.0, 0.0),
+            (0.4, 0.4),
+            (2.0, 1.0),
+            (f32::NAN, 1.0),
+            (f32::INFINITY, 1.0),
+        ] {
+            assert_eq!(normalize_opacity(value), expected);
+        }
+    }
 
     #[test]
     fn cube_normals_point_outward() {

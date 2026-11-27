@@ -86,7 +86,8 @@ pub trait EngineApi {
     /// a new object, including repeated loads of the same file.
     /// Supports `.gltf`, `.glb` and `.obj`; parts share the first explicit color
     /// on used geometry, or neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
-    /// Textures and model-provided normals are ignored. Scene lighting is
+    /// OBJ diffuse textures and material opacity are rendered; model-provided
+    /// normals are ignored. Scene lighting is
     /// applied when the model is rendered. This operation requires no window.
     /// During the blocking `run`, use [`crate::FrameContext::load_model`] from
     /// a frame handler instead.
