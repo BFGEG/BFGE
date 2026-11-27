@@ -50,7 +50,9 @@ pub trait EngineApi {
     /// called in registration order and receive a [`crate::FrameContext`] and
     /// frame times. The context exposes scene operations and synchronous model
     /// loading during `run`. A handler error stops the loop and is returned
-    /// from `run`. Scene changes made before an error are retained. Handlers
+    /// from `run`. A handler can call [`crate::FrameContext::request_exit`] to
+    /// return successfully after the current frame, without shutting down the
+    /// session. Scene changes made before an error are retained. Handlers
     /// remain registered across sessions. Both phases are paused while the
     /// window has a zero dimension.
     ///
@@ -84,7 +86,8 @@ pub trait EngineApi {
     /// a new object, including repeated loads of the same file.
     /// Supports `.gltf`, `.glb` and `.obj`; parts share the first explicit color
     /// on used geometry, or neutral linear RGBA `[0.8, 0.8, 0.8, 1.0]`.
-    /// Textures and model-provided normals are ignored. Scene lighting is
+    /// OBJ diffuse textures and material opacity are rendered; model-provided
+    /// normals are ignored. Scene lighting is
     /// applied when the model is rendered. This operation requires no window.
     /// During the blocking `run`, use [`crate::FrameContext::load_model`] from
     /// a frame handler instead.

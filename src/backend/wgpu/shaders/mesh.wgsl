@@ -46,6 +46,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         diffuse = max(dot(normalize(in.normal), -camera.light_direction.xyz), 0.0);
     }
     let illumination = camera.ambient.rgb + diffuse * camera.light_color.rgb;
-    let albedo = textureSample(diffuse_texture, diffuse_sampler, in.uv).rgb;
-    return vec4<f32>(in.color.rgb * albedo * illumination, in.color.a);
+    let albedo = textureSample(diffuse_texture, diffuse_sampler, in.uv);
+    return vec4<f32>(in.color.rgb * albedo.rgb * illumination, in.color.a * albedo.a);
 }

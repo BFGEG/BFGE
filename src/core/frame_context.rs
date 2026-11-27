@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use crate::platform::InputState;
+use crate::platform::{InputState, WindowSize};
 use crate::resources::manager::ResourceManager;
 use crate::scene::api::SceneApi;
 use crate::scene::ids::{SceneNodeId, SceneObjectId};
@@ -17,6 +17,8 @@ pub struct FrameContext<'a> {
     scene: &'a mut SceneManager,
     resources: &'a mut ResourceManager,
     input: &'a InputState,
+    window_size: WindowSize,
+    exit_requested: &'a mut bool,
 }
 
 impl<'a> FrameContext<'a> {
@@ -24,11 +26,15 @@ impl<'a> FrameContext<'a> {
         scene: &'a mut SceneManager,
         resources: &'a mut ResourceManager,
         input: &'a InputState,
+        window_size: WindowSize,
+        exit_requested: &'a mut bool,
     ) -> Self {
         Self {
             scene,
             resources,
             input,
+            window_size,
+            exit_requested,
         }
     }
 
@@ -43,6 +49,25 @@ impl<'a> FrameContext<'a> {
     /// the mouse motion accumulated before the callback.
     pub fn input(&self) -> &InputState {
         self.input
+    }
+
+    /// Requests a successful return from [`crate::EngineApi::run`].
+    ///
+    /// The current frame completes, including later handlers, rendering and
+    /// input reset. Repeated requests have the same effect. A callback or render
+    /// error still takes precedence and is returned normally. The session stays
+    /// initialized; the caller remains responsible for calling
+    /// [`crate::EngineApi::shutdown`]. A later `run` starts without this request.
+    pub fn request_exit(&mut self) {
+        *self.exit_requested = true;
+    }
+
+    /// Returns this frame's rendering area in physical pixels.
+    ///
+    /// Uses the size applied to rendering after processing resize events.
+    /// Cursor positions from [`Self::input`] use the same physical pixel units.
+    pub fn window_size(&self) -> WindowSize {
+        self.window_size
     }
 
     /// Loads `path` and attaches a new object to `parent` during the callback.

@@ -43,6 +43,7 @@ const MESH_UNIFORM_SIZE: NonZeroU64 = NonZeroU64::new(size_of::<MeshUniform>() a
 #[derive(Debug)]
 pub(crate) struct MeshPipeline {
     pipeline: wgpu::RenderPipeline,
+    transparent_pipeline: wgpu::RenderPipeline,
     camera_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
     mesh_layout: wgpu::BindGroupLayout,
@@ -66,6 +67,16 @@ impl MeshPipeline {
             &camera_layout,
             &mesh_layout,
             &material_layout,
+            false,
+        );
+        let transparent_pipeline = create_pipeline(
+            device,
+            &shader,
+            format,
+            &camera_layout,
+            &mesh_layout,
+            &material_layout,
+            true,
         );
 
         let camera_buffer = uniform_buffer(device, CAMERA_BUFFER_LABEL, size_of::<CameraUniform>());
@@ -87,6 +98,7 @@ impl MeshPipeline {
 
         Self {
             pipeline,
+            transparent_pipeline,
             camera_buffer,
             camera_bind_group,
             mesh_layout,
@@ -114,8 +126,12 @@ impl MeshPipeline {
         &self.material_layout
     }
 
-    pub(crate) fn pipeline(&self) -> &wgpu::RenderPipeline {
-        &self.pipeline
+    pub(crate) fn pipeline(&self, transparent: bool) -> &wgpu::RenderPipeline {
+        if transparent {
+            &self.transparent_pipeline
+        } else {
+            &self.pipeline
+        }
     }
 
     pub(crate) fn write_camera(
@@ -248,6 +264,7 @@ fn create_pipeline(
     camera_layout: &wgpu::BindGroupLayout,
     mesh_layout: &wgpu::BindGroupLayout,
     material_layout: &wgpu::BindGroupLayout,
+    transparent: bool,
 ) -> wgpu::RenderPipeline {
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(PIPELINE_LABEL),
@@ -270,12 +287,16 @@ fn create_pipeline(
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: if transparent {
+                None
+            } else {
+                Some(wgpu::Face::Back)
+            },
             ..Default::default()
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(!transparent),
             depth_compare: Some(wgpu::CompareFunction::Less),
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
@@ -287,7 +308,7 @@ fn create_pipeline(
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
-                blend: None,
+                blend: transparent.then_some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
@@ -388,3 +409,7 @@ mod tests {
         assert!(entry_points.contains(&"fs_main"));
     }
 }
+
+#[cfg(test)]
+#[path = "transparency_tests.rs"]
+mod transparency_tests;
