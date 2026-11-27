@@ -50,7 +50,9 @@ pub trait EngineApi {
     /// called in registration order and receive a [`crate::FrameContext`] and
     /// frame times. The context exposes scene operations and synchronous model
     /// loading during `run`. A handler error stops the loop and is returned
-    /// from `run`. Scene changes made before an error are retained. Handlers
+    /// from `run`. A handler can call [`crate::FrameContext::request_exit`] to
+    /// return successfully after the current frame, without shutting down the
+    /// session. Scene changes made before an error are retained. Handlers
     /// remain registered across sessions. Both phases are paused while the
     /// window has a zero dimension.
     ///

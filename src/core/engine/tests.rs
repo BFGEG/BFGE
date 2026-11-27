@@ -250,8 +250,14 @@ fn event_registration_retains_handlers_without_calling_them() {
         time_since_last_frame: 0.0,
     };
     let input = InputState::default();
-    let mut context =
-        FrameContext::new(&mut engine.parts.scene, &mut engine.parts.resources, &input);
+    let mut exit_requested = false;
+    let mut context = FrameContext::new(
+        &mut engine.parts.scene,
+        &mut engine.parts.resources,
+        &input,
+        TEST_SIZE,
+        &mut exit_requested,
+    );
     for event in engine.event_loop.callbacks() {
         (event.frame_started)(&mut context, &time).expect("the registered test handler succeeds");
         (event.frame_ended)(&mut context, &time).expect("the registered test handler succeeds");
@@ -1127,4 +1133,185 @@ fn frame_ended_visibility_change_reaches_the_next_frame() {
     let state = state.borrow();
     assert_eq!(state.frames[0].items.len(), 1);
     assert!(state.frames[1].items.is_empty());
+}
+
+#[test]
+fn frame_started_exit_completes_the_frame_and_leaves_shutdown_to_the_caller() {
+    let (mut engine, state) = initialized_engine();
+    engine
+        .platform
+        .as_mut()
+        .unwrap()
+        .input_mut()
+        .handle_device_state(&DeviceEvent::MouseMotion { delta: (4.0, 2.0) });
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|context, _| {
+                context.request_exit();
+                context.request_exit();
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+    register_recorders(&mut engine, &state);
+
+    run_batches(&mut engine, [vec![]]).unwrap();
+
+    assert_eq!(
+        state.borrow().calls,
+        [
+            Call::Started(0),
+            Call::Started(1),
+            Call::Render,
+            Call::Ended(0),
+            Call::Ended(1)
+        ]
+    );
+    assert!(!engine.event_loop.is_running());
+    assert!(engine.event_loop.next_internal().is_none());
+    assert!(engine.platform.is_some());
+    assert_eq!(
+        engine.platform.as_ref().unwrap().input().mouse_delta(),
+        (0.0, 0.0)
+    );
+    assert_eq!(state.borrow().shutdown_count, 0);
+    engine.shutdown().unwrap();
+    assert_eq!(state.borrow().shutdown_count, 1);
+}
+
+#[test]
+fn frame_ended_exit_still_calls_later_frame_ended_handlers() {
+    let (mut engine, state) = initialized_engine();
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|_, _| Ok(())),
+            frame_ended: Box::new(|context, _| {
+                context.request_exit();
+                Ok(())
+            }),
+        })
+        .unwrap();
+    register_recorders(&mut engine, &state);
+
+    run_batches(&mut engine, [vec![]]).unwrap();
+
+    assert_eq!(
+        state.borrow().calls,
+        [
+            Call::Started(0),
+            Call::Started(1),
+            Call::Render,
+            Call::Ended(0),
+            Call::Ended(1)
+        ]
+    );
+    assert_eq!(state.borrow().frames.len(), 1);
+}
+
+#[test]
+fn exit_request_does_not_leak_into_a_later_run() {
+    let (mut engine, state) = initialized_engine();
+    let mut first_frame = true;
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                if first_frame {
+                    context.request_exit();
+                    first_frame = false;
+                }
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+
+    run_batches(&mut engine, [vec![]]).unwrap();
+    run_batches(
+        &mut engine,
+        [vec![], vec![], vec![PlatformEvent::CloseRequested]],
+    )
+    .unwrap();
+
+    assert_eq!(state.borrow().frames.len(), 3);
+}
+
+#[test]
+fn callback_error_after_exit_request_is_not_hidden() {
+    let (mut engine, state) = initialized_engine();
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|context, _| {
+                context.request_exit();
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|_, _| Err(crate::SceneError::InvalidReparent.into())),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+
+    let result = run_batches(&mut engine, [vec![]]);
+
+    assert!(matches!(
+        result,
+        Err(EngineError::Scene(crate::SceneError::InvalidReparent))
+    ));
+    assert!(state.borrow().frames.is_empty());
+    assert!(!engine.event_loop.is_running());
+}
+
+#[test]
+fn render_error_after_exit_request_is_not_hidden() {
+    let (mut engine, state) = initialized_engine();
+    state.borrow_mut().fail_render = true;
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(|context, _| {
+                context.request_exit();
+                Ok(())
+            }),
+            frame_ended: Box::new(|_, _| Ok(())),
+        })
+        .unwrap();
+    register_recorders(&mut engine, &state);
+
+    let result = run_batches(&mut engine, [vec![]]);
+
+    assert!(matches!(result, Err(EngineError::Render(_))));
+    assert_eq!(
+        state.borrow().calls,
+        [Call::Started(0), Call::Started(1), Call::Render]
+    );
+    assert!(!engine.event_loop.is_running());
+}
+
+#[test]
+fn frame_context_reports_the_resized_render_area_in_both_handlers() {
+    let (mut engine, _) = initialized_engine();
+    let size = WindowSize::new(1200, 900);
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    let started = Rc::clone(&seen);
+    let ended = Rc::clone(&seen);
+    engine
+        .add_event(EngineEvent {
+            frame_started: Box::new(move |context, _| {
+                started.borrow_mut().push(context.window_size());
+                Ok(())
+            }),
+            frame_ended: Box::new(move |context, _| {
+                ended.borrow_mut().push(context.window_size());
+                context.request_exit();
+                Ok(())
+            }),
+        })
+        .unwrap();
+
+    run_batches(&mut engine, [vec![PlatformEvent::Resized(size)]]).unwrap();
+
+    assert_eq!(*seen.borrow(), [size, size]);
 }

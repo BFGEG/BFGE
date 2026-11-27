@@ -23,7 +23,7 @@ use crate::systems::persistence::{self, ScenePersistenceError};
 ///
 /// The engine owns the scene, its model resources, frame handlers and graphics
 /// system. It creates a window during initialization and drives frame updates
-/// until the window closes or an error occurs.
+/// until the window closes, a frame handler requests exit, or an error occurs.
 ///
 /// A session is the interval between [`EngineApi::initialize`] and
 /// [`EngineApi::shutdown`]. The engine itself, its event loop and its scene
@@ -77,30 +77,41 @@ impl Engine {
         size: WindowSize,
         clock: &mut FrameClock,
         now: &mut impl FnMut() -> Instant,
-    ) -> Result<(), EngineError> {
+    ) -> Result<bool, EngineError> {
         let input = self
             .platform
             .as_ref()
             .ok_or(EngineError::NotInitialized)?
             .input();
+        let mut exit_requested = false;
         clock.begin_frame(now());
         for event in self.event_loop.callbacks() {
-            let mut context =
-                FrameContext::new(&mut self.parts.scene, &mut self.parts.resources, input);
+            let mut context = FrameContext::new(
+                &mut self.parts.scene,
+                &mut self.parts.resources,
+                input,
+                size,
+                &mut exit_requested,
+            );
             (event.frame_started)(&mut context, &clock.event_time(now()))?;
         }
         let frame = self.parts.scene.build_render_frame(size);
         self.parts.renderer.render(&frame, &self.parts.resources)?;
         for event in self.event_loop.callbacks() {
-            let mut context =
-                FrameContext::new(&mut self.parts.scene, &mut self.parts.resources, input);
+            let mut context = FrameContext::new(
+                &mut self.parts.scene,
+                &mut self.parts.resources,
+                input,
+                size,
+                &mut exit_requested,
+            );
             (event.frame_ended)(&mut context, &clock.event_time(now()))?;
         }
         self.platform
             .as_mut()
             .ok_or(EngineError::NotInitialized)?
             .end_input_frame();
-        Ok(())
+        Ok(exit_requested)
     }
 
     fn run_with_events(
@@ -142,8 +153,11 @@ impl Engine {
             while let Some(event) = self.event_loop.next_internal() {
                 match event {
                     InternalEvent::Tick => {
-                        if size.width != 0 && size.height != 0 {
-                            self.frame_pass(size, &mut clock, now)?;
+                        if size.width != 0
+                            && size.height != 0
+                            && self.frame_pass(size, &mut clock, now)?
+                        {
+                            self.event_loop.stop();
                         }
                     }
                     InternalEvent::WindowResized(new_size) => {
